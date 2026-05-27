@@ -5,6 +5,9 @@ import { studentKey } from "./league-types";
 const STUDENTS_KEY = "bdm.students.v2";
 const MATCHES_KEY = "bdm.matches.v1";
 const TITLE_KEY = "bdm.title.v1";
+const LOCKED_KEY = "bdm.locked.v1";
+
+const API_URL = "https://script.google.com/macros/s/AKfycbxXC4J6zKWq_vEEbh_CnARl9V6SD9Dtt_nk1oMcmIZHTJVU5XdqV8xYM5d5YkOu6COEYA/exec";
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -36,49 +39,120 @@ function saveJSON(key: string, value: unknown) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
-const LOCKED_KEY = "bdm.locked.v1";
-
 export function useLeagueStore() {
   const [hydrated, setHydrated] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [title, setTitle] = useState<string>("2026 초등 배드민턴 리그전");
   const [isLocked, setIsLocked] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
-  useEffect(() => {
-    const existing = loadJSON<Student[] | null>(STUDENTS_KEY, null);
-    setStudents(existing && existing.length > 0 ? existing : SEED_STUDENTS);
-    setMatches(loadJSON<Match[]>(MATCHES_KEY, []));
-    setTitle(loadJSON<string>(TITLE_KEY, "2026 초등 배드민턴 리그전"));
-    setIsLocked(loadJSON<boolean>(LOCKED_KEY, false));
-    setHydrated(true);
+  // 1. Google Sheets REST API 데이터베이스 전체 일괄 동기화 (POST)
+  const syncWithGoogleSheets = useCallback(async (currentStudents: Student[], currentMatches: Match[]) => {
+    setIsSyncing(true);
+    try {
+      // CORS 및 preflight(OPTIONS) 차단 이슈 방지를 위해 text/plain 포맷으로 단순 요청 처리
+      await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "SYNC_ALL",
+          students: currentStudents,
+          matches: currentMatches
+        })
+      });
+      console.log("Successfully synced all league data to Google Sheets!");
+    } catch (error) {
+      console.error("Failed to sync database to Google Sheets:", error);
+    } finally {
+      setIsSyncing(false);
+    }
   }, []);
 
+  // 2. 초기 기동 시 데이터 Hydration & 구글 시트 양방향 연동 (GET)
+  useEffect(() => {
+    const initData = async () => {
+      // A. 로컬 스토리지 데이터 우선 로드 (오프라인 0ms 대응 및 빠른 초도 화면 렌더링)
+      const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
+      const localMatches = loadJSON<Match[]>(MATCHES_KEY, []);
+      const localTitle = loadJSON<string>(TITLE_KEY, "2026 초등 배드민턴 리그전");
+      const localLocked = loadJSON<boolean>(LOCKED_KEY, false);
+
+      const activeStudents = localStudents && localStudents.length > 0 ? localStudents : SEED_STUDENTS;
+      setStudents(activeStudents);
+      setMatches(localMatches);
+      setTitle(localTitle);
+      setIsLocked(localLocked);
+      setHydrated(true);
+
+      // B. 구글 시트에서 최신 데이터베이스 패치하여 갱신 및 로컬 싱크
+      setIsSyncing(true);
+      try {
+        const response = await fetch(API_URL);
+        const data = await response.json();
+        if (data.status === "success") {
+          if (data.students && data.students.length > 0) {
+            setStudents(data.students);
+            saveJSON(STUDENTS_KEY, data.students);
+          }
+          if (data.matches) {
+            setMatches(data.matches);
+            saveJSON(MATCHES_KEY, data.matches);
+          }
+          console.log("Google Sheets database successfully loaded and synchronized!");
+        }
+      } catch (error) {
+        console.warn("Could not fetch remote Google Sheets database. Operating in local cache mode:", error);
+      } finally {
+        setIsSyncing(false);
+      }
+    };
+
+    initData();
+  }, []);
+
+  // 로컬 영속 저장 트리거
   useEffect(() => { if (hydrated) saveJSON(STUDENTS_KEY, students); }, [students, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(MATCHES_KEY, matches); }, [matches, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(TITLE_KEY, title); }, [title, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(LOCKED_KEY, isLocked); }, [isLocked, hydrated]);
 
+  // 경기 기록 및 실시간 구글 시트 밀어넣기
   const recordMatch = useCallback((playerAId: string, playerBId: string, scoreA: number, scoreB: number) => {
     if (playerAId === playerBId) return;
     const aWon = scoreA > scoreB;
     const match: Match = { id: uid(), playerAId, playerBId, scoreA, scoreB, date: new Date().toISOString() };
-    setMatches((prev) => [match, ...prev]);
-    setStudents((prev) => prev.map((s) => {
-      if (s.id !== playerAId && s.id !== playerBId) return s;
-      const isA = s.id === playerAId;
-      const won = isA ? aWon : !aWon;
-      const delta = won ? 25 : -20;
-      return {
-        ...s,
-        rp: Math.max(0, s.rp + delta),
-        wins: s.wins + (won ? 1 : 0),
-        losses: s.losses + (won ? 0 : 1),
-        recent: [(won ? "W" : "L") as "W" | "L", ...s.recent].slice(0, 5),
-      };
-    }));
-  }, []);
+    
+    let nextMatches: Match[] = [];
+    setMatches((prev) => {
+      nextMatches = [match, ...prev];
+      return nextMatches;
+    });
 
+    setStudents((prev) => {
+      const nextStudents = prev.map((s) => {
+        if (s.id !== playerAId && s.id !== playerBId) return s;
+        const isA = s.id === playerAId;
+        const won = isA ? aWon : !aWon;
+        const delta = won ? 25 : -20;
+        return {
+          ...s,
+          rp: Math.max(0, s.rp + delta),
+          wins: s.wins + (won ? 1 : 0),
+          losses: s.losses + (won ? 0 : 1),
+          recent: [(won ? "W" : "L") as "W" | "L", ...s.recent].slice(0, 5),
+        };
+      });
+
+      // 비동기 양방향 동기화 호출
+      syncWithGoogleSheets(nextStudents, nextMatches);
+      return nextStudents;
+    });
+  }, [syncWithGoogleSheets]);
+
+  // 경기 삭제(롤백) 및 실시간 동기화
   const deleteMatch = useCallback((matchId: string) => {
     setMatches((prevMatches) => {
       const match = prevMatches.find((m) => m.id === matchId);
@@ -91,19 +165,17 @@ export function useLeagueStore() {
         const playerBId = match.playerBId;
         const aWon = match.scoreA > match.scoreB;
 
-        return prevStudents.map((s) => {
+        const nextStudents = prevStudents.map((s) => {
           if (s.id !== playerAId && s.id !== playerBId) return s;
 
           const isA = s.id === playerAId;
           const won = isA ? aWon : !aWon;
           
-          // Bilateral Rollback: Winners lost 25 RP and losers gained 20 RP
           const rpDelta = won ? -25 : 20;
           const newRp = Math.max(0, s.rp + rpDelta);
           const newWins = Math.max(0, s.wins - (won ? 1 : 0));
           const newLosses = Math.max(0, s.losses - (won ? 0 : 1));
 
-          // Recalculate recent array from remaining matches
           const sMatches = nextMatches
             .filter((m) => m.playerAId === s.id || m.playerBId === s.id)
             .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
@@ -124,12 +196,17 @@ export function useLeagueStore() {
             recent: newRecent,
           };
         });
+
+        // 비동기 양방향 동기화 호출
+        syncWithGoogleSheets(nextStudents, nextMatches);
+        return nextStudents;
       });
 
       return nextMatches;
     });
-  }, []);
+  }, [syncWithGoogleSheets]);
 
+  // 개별 학생 전적 리셋 및 동기화
   const resetStudent = useCallback((studentId: string) => {
     setMatches((prevMatches) => {
       const nextMatches = prevMatches.filter(
@@ -143,7 +220,7 @@ export function useLeagueStore() {
       });
 
       setStudents((prevStudents) => {
-        return prevStudents.map((s) => {
+        const nextStudents = prevStudents.map((s) => {
           if (s.id === studentId) {
             return {
               ...s,
@@ -155,7 +232,6 @@ export function useLeagueStore() {
           }
 
           if (playedOpponents.has(s.id)) {
-            // Recalculate recent matches for opponent students (keeps wins/losses secure, but aligns visual timeline)
             const sMatches = nextMatches
               .filter((m) => m.playerAId === s.id || m.playerBId === s.id)
               .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
@@ -176,41 +252,59 @@ export function useLeagueStore() {
 
           return s;
         });
+
+        // 비동기 양방향 동기화 호출
+        syncWithGoogleSheets(nextStudents, nextMatches);
+        return nextStudents;
       });
 
       return nextMatches;
     });
-  }, []);
+  }, [syncWithGoogleSheets]);
 
+  // 시즌 전체 초기화 및 동기화
   const resetAllData = useCallback(() => {
-    setMatches([]);
-    setStudents((prev) =>
-      prev.map((s) => ({
+    const nextMatches: Match[] = [];
+    setMatches(nextMatches);
+    
+    setStudents((prev) => {
+      const nextStudents = prev.map((s) => ({
         ...s,
         rp: 1000,
         wins: 0,
         losses: 0,
         recent: [],
-      }))
-    );
-  }, []);
+      }));
 
+      // 비동기 양방향 동기화 호출
+      syncWithGoogleSheets(nextStudents, nextMatches);
+      return nextStudents;
+    });
+  }, [syncWithGoogleSheets]);
+
+  // 교사 관리자 수동 RP 수정 및 동기화
   const updateStudentRP = useCallback((studentId: string, nextRp: number) => {
-    setStudents((prev) =>
-      prev.map((s) => {
+    setStudents((prev) => {
+      const nextStudents = prev.map((s) => {
         if (s.id !== studentId) return s;
         return {
           ...s,
           rp: Math.max(0, nextRp),
         };
-      })
-    );
-  }, []);
+      });
 
-  // Upsert students: preserve existing RP/records when keys match; add new with 1000 RP.
+      // 비동기 양방향 동기화 호출
+      syncWithGoogleSheets(nextStudents, matches);
+      return nextStudents;
+    });
+  }, [matches, syncWithGoogleSheets]);
+
+  // 새로운 명렬표 대량 업서트 및 동기화
   const upsertStudents = useCallback(
     (rows: { grade: number; classNum: number; number: number; name: string; gender?: Gender }[]) => {
       let added = 0, kept = 0;
+      let targetStudents: Student[] = [];
+
       setStudents((prev) => {
         const byKey = new Map(prev.map((s) => [studentKey(s), s]));
         const next: Student[] = [];
@@ -239,17 +333,36 @@ export function useLeagueStore() {
             });
           }
         }
-        // Also keep students that weren't in the new paste — preserves history across class-by-class uploads.
         for (const s of prev) {
           const k = studentKey(s);
           if (!seenKeys.has(k)) next.push(s);
         }
+        targetStudents = next;
+        
+        // 비동기 양방향 동기화 호출
+        syncWithGoogleSheets(targetStudents, matches);
         return next;
       });
+
       return { added, kept };
     },
-    [],
+    [matches, syncWithGoogleSheets],
   );
 
-  return { hydrated, students, matches, title, setTitle, recordMatch, upsertStudents, isLocked, setIsLocked, deleteMatch, resetStudent, resetAllData, updateStudentRP };
+  return { 
+    hydrated, 
+    students, 
+    matches, 
+    title, 
+    setTitle, 
+    recordMatch, 
+    upsertStudents, 
+    isLocked, 
+    setIsLocked, 
+    deleteMatch, 
+    resetStudent, 
+    resetAllData, 
+    updateStudentRP,
+    isSyncing // 동기화 상태 노출
+  };
 }

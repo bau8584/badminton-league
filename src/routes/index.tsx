@@ -37,6 +37,7 @@ function Index() {
     resetStudent,
     resetAllData,
     updateStudentRP,
+    isSyncing,
   } = useLeagueStore();
 
   const [tab, setTab] = useState<Tab>("leaderboard");
@@ -89,10 +90,18 @@ function Index() {
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2 rounded-full border border-border/60 bg-card/60 px-4 py-1.5 text-xs">
-              <Users className="size-3.5 text-neon-green" />
-              <span className="font-mono text-muted-foreground">등록 선수</span>
-              <span className="font-bold text-neon-green">{students.length}</span>
+            <div className="flex items-center gap-3 flex-wrap">
+              {isSyncing && (
+                <div className="flex items-center gap-1.5 rounded-full border border-neon-blue/40 bg-neon-blue/5 px-3 py-1 text-xs text-neon-blue animate-pulse">
+                  <span className="size-1.5 rounded-full bg-neon-blue animate-ping" />
+                  <span className="font-bold text-[10px] tracking-wider">🔄 구글 DB 동기화 중...</span>
+                </div>
+              )}
+              <div className="flex items-center gap-2 rounded-full border border-border/60 bg-card/60 px-4 py-1.5 text-xs">
+                <Users className="size-3.5 text-neon-green" />
+                <span className="font-mono text-muted-foreground">등록 선수</span>
+                <span className="font-bold text-neon-green">{students.length}</span>
+              </div>
             </div>
           </div>
 
