@@ -7,7 +7,11 @@ const MATCHES_KEY = "bdm.matches.v1";
 const TITLE_KEY = "bdm.title.v1";
 const LOCKED_KEY = "bdm.locked.v1";
 
-const API_URL = "https://script.google.com/macros/s/AKfycbxXC4J6zKWq_vEEbh_CnARl9V6SD9Dtt_nk1oMcmIZHTJVU5XdqV8xYM5d5YkOu6COEYA/exec";
+// 세션 영속 저장을 위한 로컬스토리지 키
+const SESSION_KEY = "bdm.session.v1";
+
+// 마스터 DB 구글 Apps Script Web App API 주소
+const MASTER_API_URL = "https://script.google.com/macros/s/AKfycbzcu1d1T8pHvzwvcPn2qPFIg8YtCQxsspvfQ6Koa-ie6wWE9UhEvtPzurK92SVeJEMvyQ/exec";
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -39,6 +43,14 @@ function saveJSON(key: string, value: unknown) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+type UserSession = {
+  loginId: string;
+  role: "MASTER" | "TEACHER" | "STUDENT";
+  schoolName: string;
+  userName: string;
+  scriptUrl: string;
+} | null;
+
 export function useLeagueStore() {
   const [hydrated, setHydrated] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
@@ -47,12 +59,16 @@ export function useLeagueStore() {
   const [isLocked, setIsLocked] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
-  // 1. Google Sheets REST API 데이터베이스 전체 일괄 동기화 (POST)
+  // 3대 역할 로그인 세션 상태
+  const [session, setSession] = useState<UserSession>(null);
+
+  // 1. 구글 스프레드시트 데이터베이스 전체 일괄 동기화 (POST)
   const syncWithGoogleSheets = useCallback(async (currentStudents: Student[], currentMatches: Match[]) => {
+    // 세션에 개인 scriptUrl이 없으면 동기화 생략 (로컬 저장만 적용)
+    if (!session || !session.scriptUrl) return;
     setIsSyncing(true);
     try {
-      // CORS 및 preflight(OPTIONS) 차단 이슈 방지를 위해 text/plain 포맷으로 단순 요청 처리
-      await fetch(API_URL, {
+      await fetch(session.scriptUrl, {
         method: "POST",
         headers: {
           "Content-Type": "text/plain;charset=utf-8",
@@ -63,18 +79,120 @@ export function useLeagueStore() {
           matches: currentMatches
         })
       });
-      console.log("Successfully synced all league data to Google Sheets!");
+      console.log("Successfully synced all league data to tenant Google Sheets!");
     } catch (error) {
       console.error("Failed to sync database to Google Sheets:", error);
     } finally {
       setIsSyncing(false);
     }
+  }, [session]);
+
+  // 2. 로그인 수행 함수 (마스터 DB와 대조 검증)
+  const loginUser = useCallback(async (loginId: string, password: string, role: "MASTER" | "TEACHER" | "STUDENT") => {
+    setIsSyncing(true);
+    try {
+      const response = await fetch(MASTER_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "LOGIN",
+          loginId,
+          password,
+          role
+        })
+      });
+      const data = await response.json();
+      if (data.status === "success" && data.user) {
+        setSession(data.user);
+        saveJSON(SESSION_KEY, data.user);
+        
+        // 로그인 성공 시 해당 이용자의 전용 구글 시트에서 즉시 전적 데이터 끌어오기 (Hydration)
+        if (data.user.scriptUrl) {
+          try {
+            const remoteRes = await fetch(data.user.scriptUrl);
+            const remoteData = await remoteRes.json();
+            if (remoteData.status === "success") {
+              if (remoteData.students) {
+                setStudents(remoteData.students);
+                saveJSON(STUDENTS_KEY, remoteData.students);
+              }
+              if (remoteData.matches) {
+                setMatches(remoteData.matches);
+                saveJSON(MATCHES_KEY, remoteData.matches);
+              }
+            }
+          } catch (err) {
+            console.warn("Could not download remote sheet data upon login. Using cached/seed data:", err);
+          }
+        }
+        return { success: true };
+      } else {
+        return { success: false, message: data.message || "로그인 정보가 맞지 않습니다." };
+      }
+    } catch (error) {
+      console.error("Login request failed:", error);
+      return { success: false, message: "마스터 서버에 접속할 수 없습니다. 인터넷 상태를 확인해 주세요." };
+    } finally {
+      setIsSyncing(false);
+    }
   }, []);
 
-  // 2. 초기 기동 시 데이터 Hydration & 구글 시트 양방향 연동 (GET)
+  // 3. 신규 회원가입(교사/학생 등록) 수행 함수
+  const registerUser = useCallback(async (details: {
+    loginId: string;
+    password: string;
+    role: "TEACHER" | "STUDENT";
+    schoolName: string;
+    userName: string;
+    scriptUrl?: string;
+  }) => {
+    setIsSyncing(true);
+    try {
+      const response = await fetch(MASTER_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "REGISTER",
+          ...details
+        })
+      });
+      const data = await response.json();
+      if (data.status === "success") {
+        return { success: true, message: data.message };
+      } else {
+        return { success: false, message: data.message || "가입 처리에 실패했습니다." };
+      }
+    } catch (error) {
+      console.error("Registration request failed:", error);
+      return { success: false, message: "마스터 가입 서버에 접속할 수 없습니다." };
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
+  // 4. 로그아웃 수행 함수
+  const logoutUser = useCallback(() => {
+    setSession(null);
+    saveJSON(SESSION_KEY, null);
+    // 상태 초기화
+    setStudents(SEED_STUDENTS);
+    setMatches([]);
+    saveJSON(STUDENTS_KEY, SEED_STUDENTS);
+    saveJSON(MATCHES_KEY, []);
+  }, []);
+
+  // 5. 초기 기동 시 세션 및 로컬 데이터 Hydration
   useEffect(() => {
     const initData = async () => {
-      // A. 로컬 스토리지 데이터 우선 로드 (오프라인 0ms 대응 및 빠른 초도 화면 렌더링)
+      // A. 교사 세션 로딩
+      const cachedSession = loadJSON<UserSession>(SESSION_KEY, null);
+      setSession(cachedSession);
+
+      // B. 로컬 스토리지 리그 전적 로드
       const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
       const localMatches = loadJSON<Match[]>(MATCHES_KEY, []);
       const localTitle = loadJSON<string>(TITLE_KEY, "2026 초등 배드민턴 리그전");
@@ -87,39 +205,41 @@ export function useLeagueStore() {
       setIsLocked(localLocked);
       setHydrated(true);
 
-      // B. 구글 시트에서 최신 데이터베이스 패치하여 갱신 및 로컬 싱크
-      setIsSyncing(true);
-      try {
-        const response = await fetch(API_URL);
-        const data = await response.json();
-        if (data.status === "success") {
-          if (data.students && data.students.length > 0) {
-            setStudents(data.students);
-            saveJSON(STUDENTS_KEY, data.students);
+      // C. 세션이 살아있는 경우 개인 구글 시트 연동 갱신 (GET)
+      if (cachedSession && cachedSession.scriptUrl) {
+        setIsSyncing(true);
+        try {
+          const response = await fetch(cachedSession.scriptUrl);
+          const data = await response.json();
+          if (data.status === "success") {
+            if (data.students && data.students.length > 0) {
+              setStudents(data.students);
+              saveJSON(STUDENTS_KEY, data.students);
+            }
+            if (data.matches) {
+              setMatches(data.matches);
+              saveJSON(MATCHES_KEY, data.matches);
+            }
+            console.log("Google Sheets database synchronized on session load!");
           }
-          if (data.matches) {
-            setMatches(data.matches);
-            saveJSON(MATCHES_KEY, data.matches);
-          }
-          console.log("Google Sheets database successfully loaded and synchronized!");
+        } catch (error) {
+          console.warn("Could not sync with remote sheet on initialization. Local cache utilized:", error);
+        } finally {
+          setIsSyncing(false);
         }
-      } catch (error) {
-        console.warn("Could not fetch remote Google Sheets database. Operating in local cache mode:", error);
-      } finally {
-        setIsSyncing(false);
       }
     };
 
     initData();
   }, []);
 
-  // 로컬 영속 저장 트리거
+  // 로컬 영속 캐싱 리스너
   useEffect(() => { if (hydrated) saveJSON(STUDENTS_KEY, students); }, [students, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(MATCHES_KEY, matches); }, [matches, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(TITLE_KEY, title); }, [title, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(LOCKED_KEY, isLocked); }, [isLocked, hydrated]);
 
-  // 경기 기록 및 실시간 구글 시트 밀어넣기
+  // 경기 기록 및 동기화
   const recordMatch = useCallback((playerAId: string, playerBId: string, scoreA: number, scoreB: number) => {
     if (playerAId === playerBId) return;
     const aWon = scoreA > scoreB;
@@ -146,13 +266,12 @@ export function useLeagueStore() {
         };
       });
 
-      // 비동기 양방향 동기화 호출
       syncWithGoogleSheets(nextStudents, nextMatches);
       return nextStudents;
     });
   }, [syncWithGoogleSheets]);
 
-  // 경기 삭제(롤백) 및 실시간 동기화
+  // 경기 삭제(롤백) 및 동기화
   const deleteMatch = useCallback((matchId: string) => {
     setMatches((prevMatches) => {
       const match = prevMatches.find((m) => m.id === matchId);
@@ -197,7 +316,6 @@ export function useLeagueStore() {
           };
         });
 
-        // 비동기 양방향 동기화 호출
         syncWithGoogleSheets(nextStudents, nextMatches);
         return nextStudents;
       });
@@ -253,7 +371,6 @@ export function useLeagueStore() {
           return s;
         });
 
-        // 비동기 양방향 동기화 호출
         syncWithGoogleSheets(nextStudents, nextMatches);
         return nextStudents;
       });
@@ -276,7 +393,6 @@ export function useLeagueStore() {
         recent: [],
       }));
 
-      // 비동기 양방향 동기화 호출
       syncWithGoogleSheets(nextStudents, nextMatches);
       return nextStudents;
     });
@@ -293,7 +409,6 @@ export function useLeagueStore() {
         };
       });
 
-      // 비동기 양방향 동기화 호출
       syncWithGoogleSheets(nextStudents, matches);
       return nextStudents;
     });
@@ -339,7 +454,6 @@ export function useLeagueStore() {
         }
         targetStudents = next;
         
-        // 비동기 양방향 동기화 호출
         syncWithGoogleSheets(targetStudents, matches);
         return next;
       });
@@ -363,6 +477,11 @@ export function useLeagueStore() {
     resetStudent, 
     resetAllData, 
     updateStudentRP,
-    isSyncing // 동기화 상태 노출
+    isSyncing,
+    session,       // 세션 노출
+    loginUser,     // 로그인 함수 노출
+    registerUser,  // 회원가입 함수 노출
+    logoutUser,    // 로그아웃 함수 노출
+    MASTER_API_URL // 마스터 API 주소 노출
   };
 }
