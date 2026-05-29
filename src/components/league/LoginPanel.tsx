@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Crown, Swords, Users, ShieldAlert, Key, UserPlus, Sparkles, Building2, HelpCircle } from "lucide-react";
+import { Crown, Swords, Users, ShieldAlert, Key, UserPlus, Sparkles, Building2, HelpCircle, Gamepad2 } from "lucide-react";
 
 type Role = "MASTER" | "TEACHER" | "STUDENT";
 
@@ -74,6 +74,18 @@ export function LoginPanel({
       setPassword("");
     } else {
       toast.error(res.message || "가입에 실패했습니다.");
+    }
+  };
+
+  // 1초 만에 가상 데모 환경으로 즉시 진입하는 게스트 로그인 처리
+  const handleGuestDemoLogin = async () => {
+    toast.loading("가상 데모 리그 샌드박스를 생성하는 중...", { id: "guest-loading" });
+    const res = await onLogin("guest", "guest", "TEACHER");
+    toast.dismiss("guest-loading");
+    if (res.success) {
+      toast.success("🎮 게스트 모드로 접속했습니다! 전체 기능(추천, 입력, 어드민)을 자유롭게 체험해 보세요.");
+    } else {
+      toast.error("게스트 로그인 실패");
     }
   };
 
@@ -227,6 +239,19 @@ export function LoginPanel({
             )}
           </Button>
         </form>
+
+        {/* 3. 🎮 1-Click Guest Sandbox Demo Mode Button (Only when not in register mode) */}
+        {!isRegister && (
+          <div className="mt-3 relative z-10">
+            <Button
+              type="button"
+              onClick={handleGuestDemoLogin}
+              className="w-full h-11 bg-background/80 hover:bg-neon-blue/10 text-neon-blue border border-neon-blue/50 font-black tracking-wide shadow-[0_0_15px_rgba(0,180,216,0.15)] active:scale-[0.98] transition-all gap-1.5"
+            >
+              <Gamepad2 className="size-4.5 animate-bounce" /> 🎮 로그인 없이 1초 만에 데모 구경하기
+            </Button>
+          </div>
+        )}
 
         {/* Toggle between Login and Register (Only for TEACHER/STUDENT roles) */}
         {!isSyncing && role !== "MASTER" && (

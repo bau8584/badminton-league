@@ -64,7 +64,7 @@ export function useLeagueStore() {
 
   // 1. 구글 스프레드시트 데이터베이스 전체 일괄 동기화 (POST)
   const syncWithGoogleSheets = useCallback(async (currentStudents: Student[], currentMatches: Match[]) => {
-    // 세션에 개인 scriptUrl이 없으면 동기화 생략 (로컬 저장만 적용)
+    // 세션에 개인 scriptUrl이 없으면 동기화 생략 (로컬 저장만 적용 - 게스트 모드 포함)
     if (!session || !session.scriptUrl) return;
     setIsSyncing(true);
     try {
@@ -87,8 +87,28 @@ export function useLeagueStore() {
     }
   }, [session]);
 
-  // 2. 로그인 수행 함수 (마스터 DB와 대조 검증)
+  // 2. 로그인 수행 함수 (마스터 DB와 대조 검증 및 1초 게스트 샌드박스 모드 탑재)
   const loginUser = useCallback(async (loginId: string, password: string, role: "MASTER" | "TEACHER" | "STUDENT") => {
+    // A. 🎮 게스트(체험용) 모드 예외 처리 - 구글 통신 없이 즉시 로컬 실행 가동
+    if (loginId.toLowerCase() === "guest") {
+      const guestSession = {
+        loginId: "guest",
+        role: "TEACHER" as const, // 교사 전용의 모든 기능(어드민 포함)을 100% 체험 가능
+        schoolName: "배드민턴 꿈나무 초등학교 (체험용)",
+        userName: "게스트 교사",
+        scriptUrl: "" // 구글 동기화는 비워둠 (순수 로컬 캐시 구동)
+      };
+      setSession(guestSession);
+      saveJSON(SESSION_KEY, guestSession);
+      
+      const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
+      if (!localStudents || localStudents.length === 0) {
+        setStudents(SEED_STUDENTS);
+        saveJSON(STUDENTS_KEY, SEED_STUDENTS);
+      }
+      return { success: true };
+    }
+
     setIsSyncing(true);
     try {
       const response = await fetch(MASTER_API_URL, {
@@ -478,10 +498,10 @@ export function useLeagueStore() {
     resetAllData, 
     updateStudentRP,
     isSyncing,
-    session,       // 세션 노출
-    loginUser,     // 로그인 함수 노출
-    registerUser,  // 회원가입 함수 노출
-    logoutUser,    // 로그아웃 함수 노출
-    MASTER_API_URL // 마스터 API 주소 노출
+    session,
+    loginUser,
+    registerUser,
+    logoutUser,
+    MASTER_API_URL
   };
 }
