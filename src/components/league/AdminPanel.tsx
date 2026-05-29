@@ -417,11 +417,11 @@ export function AdminPanel({
           )}
         </div>
 
-        {/* Grade/Class Selector with Double Scale for Touch Ergonomics */}
-        <div className="rounded-xl border border-border/40 bg-muted/10 p-5 mt-4 space-y-5">
+        {/* Grade/Class Selector */}
+        <div className="rounded-xl border border-border/40 bg-muted/10 p-5 mt-4 space-y-4">
           <div>
-            <span className="text-xs text-neon-blue font-bold uppercase tracking-wider">학년 선택 (Touch 2x)</span>
-            <div className="flex flex-wrap gap-3 mt-2">
+            <span className="text-xs text-neon-blue font-bold uppercase tracking-wider">학년 선택</span>
+            <div className="flex flex-wrap gap-2 mt-2">
               {[1, 2, 3, 4, 5, 6].map((g) => (
                 <button
                   key={g}
@@ -431,13 +431,13 @@ export function AdminPanel({
                     setFilterClassNum(null);
                   }}
                   className={cn(
-                    "w-16 h-16 rounded-2xl text-xl font-black transition-all active:scale-95 flex items-center justify-center border shadow-md",
+                    "px-4 py-1.5 rounded-full text-xs font-semibold border transition-all active:scale-95",
                     filterGrade === g
-                      ? "border-neon-blue bg-neon-blue/20 text-neon-blue shadow-[0_0_18px_rgba(0,180,216,0.3)]"
-                      : "border-border/60 bg-background/50 text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                      ? "border-neon-blue bg-neon-blue/20 text-neon-blue shadow-[0_0_12px_rgba(0,180,216,0.25)]"
+                      : "border-border/60 bg-background/50 text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {g}
+                  {g}학년
                 </button>
               ))}
             </div>
@@ -445,21 +445,21 @@ export function AdminPanel({
 
           {filterGrade != null && (
             <div className="animate-in fade-in duration-300">
-              <span className="text-xs text-neon-green font-bold uppercase tracking-wider">반 선택 (Touch 2x)</span>
-              <div className="flex flex-wrap gap-3 mt-2">
+              <span className="text-xs text-neon-green font-bold uppercase tracking-wider">반 선택</span>
+              <div className="flex flex-wrap gap-2 mt-2">
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].filter((c) => availableClassesForFilter.includes(c)).map((c) => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => setFilterClassNum(c)}
                     className={cn(
-                      "w-16 h-16 rounded-2xl text-xl font-black transition-all active:scale-95 flex items-center justify-center border shadow-md",
+                      "px-4 py-1.5 rounded-full text-xs font-semibold border transition-all active:scale-95",
                       filterClassNum === c
-                        ? "border-neon-green bg-neon-green/20 text-neon-green shadow-[0_0_18px_rgba(34,197,94,0.3)]"
-                        : "border-border/60 bg-background/50 text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                        ? "border-neon-green bg-neon-green/20 text-neon-green shadow-[0_0_12px_rgba(34,197,94,0.25)]"
+                        : "border-border/60 bg-background/50 text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    {c}
+                    {c}반
                   </button>
                 ))}
                 {availableClassesForFilter.length === 0 && (

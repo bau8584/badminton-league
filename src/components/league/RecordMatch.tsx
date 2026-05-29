@@ -517,23 +517,23 @@ function PlayerSelector({
       ) : (
         <div className="space-y-4">
           <Step n={1} title="학년">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-3 mt-2">
               {GRADES.map((g) => (
                 <Chip key={g} active={value.grade === g} accent={accent} onClick={() => onChange({ grade: g, classNum: null, studentId: null })}>
-                  {g}학년
+                  {g}
                 </Chip>
               ))}
             </div>
           </Step>
           {value.grade != null && (
             <Step n={2} title="반">
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-3 mt-2">
                 {CLASSES.filter((c) => classes.includes(c)).map((c) => (
                   <Chip key={c} active={value.classNum === c} accent={accent} onClick={() => onChange({ ...value, classNum: c, studentId: null })}>
-                    {c}반
+                    {c}
                   </Chip>
                 ))}
-                {classes.length === 0 && <span className="text-xs text-muted-foreground">학생이 없습니다</span>}
+                {classes.length === 0 && <span className="text-xs text-muted-foreground block py-2">학생이 없습니다</span>}
               </div>
             </Step>
           )}
@@ -576,14 +576,15 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 
 function Chip({ active, accent, onClick, children }: { active: boolean; accent: "blue" | "green"; onClick: () => void; children: React.ReactNode }) {
   const activeCls = accent === "blue"
-    ? "border-neon-blue/60 bg-neon-blue/15 text-neon-blue"
-    : "border-neon-green/60 bg-neon-green/15 text-neon-green";
+    ? "border-neon-blue bg-neon-blue/20 text-neon-blue shadow-[0_0_18px_rgba(0,180,216,0.35)]"
+    : "border-neon-green bg-neon-green/20 text-neon-green shadow-[0_0_18px_rgba(34,197,94,0.35)]";
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 py-1 text-xs font-semibold transition-all",
-        active ? activeCls : "border-border/60 bg-card/40 text-muted-foreground hover:text-foreground",
+        "w-16 h-16 rounded-2xl border text-xl font-black transition-all active:scale-95 flex items-center justify-center shadow-md",
+        active ? activeCls : "border-border/60 bg-card/40 text-muted-foreground hover:text-foreground hover:bg-muted/30",
       )}
     >
       {children}
