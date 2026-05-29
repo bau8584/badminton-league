@@ -266,6 +266,7 @@ function Index() {
                 targetClass={recommendTargetClass}
                 onTargetClassChange={setRecommendTargetClass}
                 thresholds={tierThresholds}
+                onUpdateGender={updateStudentGender}
               />
             )}
             

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { TierBadge } from "./TierBadge";
@@ -26,6 +26,8 @@ export function MatchRecommend({
   onTargetGradeChange,
   targetClass,
   onTargetClassChange,
+  thresholds,
+  onUpdateGender,
 }: {
   students: Student[];
   matches: Match[];
@@ -39,8 +41,44 @@ export function MatchRecommend({
   targetClass: number | null;
   onTargetClassChange: (c: number | null) => void;
   thresholds?: Record<string, number>;
+  onUpdateGender?: (studentId: string, gender: "M" | "F" | "U") => void;
 }) {
   const player = students.find((s) => s.id === sel.studentId) ?? null;
+
+  // 성별 정보 누락 자동 완성을 위한 상태
+  const [genderModalOpen, setGenderModalOpen] = useState(false);
+  const [genderTargetId, setGenderTargetId] = useState<string | null>(null);
+
+  // A선수 선택 시 성별이 "U"이거나 없을 때 모달 팝업 트리거
+  useEffect(() => {
+    if (sel.studentId) {
+      const selectedStudent = students.find((s) => s.id === sel.studentId);
+      if (selectedStudent && (selectedStudent.gender === "U" || !selectedStudent.gender)) {
+        setGenderTargetId(selectedStudent.id);
+        setGenderModalOpen(true);
+      }
+    }
+  }, [sel.studentId, students]);
+
+  const handleUpdateGender = (gender: "M" | "F") => {
+    if (genderTargetId) {
+      onUpdateGender?.(genderTargetId, gender);
+      setGenderModalOpen(false);
+      setGenderTargetId(null);
+      toast.success("선수의 성별이 정상 등록되었습니다!");
+    }
+  };
+
+  const handleCancelGender = () => {
+    if (genderTargetId) {
+      if (sel.studentId === genderTargetId) {
+        onSelChange({ ...sel, studentId: null });
+      }
+    }
+    setGenderModalOpen(false);
+    setGenderTargetId(null);
+    toast.warning("성별을 입력하지 않아 선수 선택이 취소되었습니다.");
+  };
 
   // 1. Grade & Class options for the "My info" selection
   const classesForSel = useMemo(() => {
@@ -677,6 +715,71 @@ export function MatchRecommend({
           )}
         </div>
       )}
+      {/* 성별 정보 보완 팝업창 (MatchRecommend) */}
+      {genderModalOpen && genderTargetId && (() => {
+        const targetStudent = students.find((s) => s.id === genderTargetId);
+        if (!targetStudent) return null;
+        return (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-300">
+            <div className="relative w-full max-w-md overflow-hidden border border-neon-blue/30 bg-background/95 rounded-2xl p-6 md:p-8 shadow-[0_0_50px_rgba(0,180,216,0.2)] flex flex-col items-center animate-in zoom-in duration-300">
+              {/* Grid Background Effect */}
+              <div className="absolute inset-0 bg-[linear-gradient(rgba(18,18,18,0.2)_1px,transparent_1px),linear-gradient(90deg,rgba(18,18,18,0.2)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none opacity-20" />
+              
+              {/* Close Button */}
+              <button 
+                onClick={handleCancelGender}
+                className="absolute right-4 top-4 text-muted-foreground hover:text-foreground hover:bg-muted/40 p-1.5 rounded-lg transition-all"
+                title="취소 및 뒤로가기"
+              >
+                <X className="size-5" />
+              </button>
+
+              {/* Title & Info */}
+              <div className="relative z-10 flex flex-col items-center text-center w-full">
+                <div className="flex size-14 items-center justify-center rounded-full bg-neon-blue/15 border border-neon-blue/30 text-neon-blue shadow-[0_0_30px_rgba(0,180,216,0.3)] mb-4 animate-pulse">
+                  <Sparkles className="size-6 text-neon-blue" />
+                </div>
+                <h3 className="text-xl font-black uppercase tracking-wider text-glow-blue text-neon-blue mb-1">
+                  선수 성별 정보 보완
+                </h3>
+                <p className="text-xs text-muted-foreground max-w-sm mb-6 leading-relaxed">
+                  <span className="font-bold text-foreground">[{targetStudent.name}]</span> 선수의 성별 정보(M/F)가 지정되지 않았습니다.<br />
+                  매치를 정확하게 추천하기 위해 성별을 입력해주세요.
+                </p>
+              </div>
+
+              {/* Gender Selection Grid */}
+              <div className="relative z-10 grid grid-cols-2 gap-4 w-full">
+                {/* Male Option */}
+                <button
+                  onClick={() => handleUpdateGender("M")}
+                  className="flex flex-col items-center justify-center p-5 rounded-xl border border-neon-blue/30 bg-neon-blue/5 hover:bg-neon-blue/15 hover:border-neon-blue/60 transition-all active:scale-95 group shadow-[0_0_15px_rgba(0,180,216,0.05)]"
+                >
+                  <span className="text-4xl mb-2 group-hover:animate-bounce">♂</span>
+                  <span className="text-sm font-black text-neon-blue tracking-wider">남성 (M)</span>
+                  <span className="text-[10px] text-muted-foreground mt-1">Male Athlete</span>
+                </button>
+
+                {/* Female Option */}
+                <button
+                  onClick={() => handleUpdateGender("F")}
+                  className="flex flex-col items-center justify-center p-5 rounded-xl border border-loss/30 bg-loss/5 hover:bg-loss/15 hover:border-loss/60 transition-all active:scale-95 group shadow-[0_0_15px_rgba(239,68,68,0.05)]"
+                >
+                  <span className="text-4xl mb-2 group-hover:animate-bounce text-loss">♀</span>
+                  <span className="text-sm font-black text-loss tracking-wider">여성 (F)</span>
+                  <span className="text-[10px] text-muted-foreground mt-1">Female Athlete</span>
+                </button>
+              </div>
+
+              {/* Notice Footer */}
+              <p className="relative z-10 text-[10px] text-muted-foreground mt-6 text-center leading-relaxed">
+                입력하신 성별 데이터는 로컬 브라우저 캐시는 물론,<br />
+                교사 전용 구글 스프레드시트 클라우드 데이터베이스에 실시간 영속 동기화됩니다.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
