@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -85,6 +85,7 @@ export function AdminPanel({
   rpVariables,
   onUpdateSettings,
   onDeleteStudent,
+  onRestoreFromCSV,
 }: {
   students: Student[];
   matches: Match[];
@@ -100,7 +101,13 @@ export function AdminPanel({
   rpVariables?: { winDelta: number; loseDelta: number };
   onUpdateSettings?: (thresholds: Record<TierName, number>, rpVars: { winDelta: number; loseDelta: number }) => void;
   onDeleteStudent?: (studentId: string) => void;
+  onRestoreFromCSV?: (students: Student[], matches: Match[]) => void;
 }) {
+  // CSV 롤백 복원 상태
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [pendingRestoreData, setPendingRestoreData] = useState<Student[] | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Bulk upload states
   const [text, setText] = useState("");
   const [showBulkUpload, setShowBulkUpload] = useState(false);
@@ -280,11 +287,83 @@ export function AdminPanel({
     
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `badminton_league_rankings_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute("download", `sports_league_rankings_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     toast.success("전체 학생 순위표 CSV 백업 다운로드가 완료되었습니다!");
+  };
+
+  // CSV 백업 파일을 업로드하여 파싱 및 롤백 복원 수행 헬퍼 함수
+  const handleCSVRestoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const csvText = event.target?.result as string;
+        if (!csvText) return;
+
+        // 줄 단위 분리
+        const lines = csvText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        if (lines.length <= 1) {
+          return toast.error("CSV 파일에 복구할 데이터가 부족하거나 비어있습니다.");
+        }
+
+        const parsedStudents: Student[] = [];
+
+        // 두 번째 줄부터 데이터 파싱
+        for (let i = 1; i < lines.length; i++) {
+          // 따옴표로 감싸진 필드 파싱 정규식 적용 (쉼표 분할)
+          const parts = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.replace(/^"|"$/g, '').trim());
+          if (parts.length < 10) continue; // 필수 컬럼 부족 시 스킵
+
+          const grade = parseInt(parts[1], 10);
+          const classNum = parseInt(parts[2], 10);
+          const number = parseInt(parts[3], 10);
+          const name = parts[4];
+          const genderRaw = parts[5];
+          const rp = parseInt(parts[6], 10);
+          const wins = parseInt(parts[8], 10);
+          const losses = parseInt(parts[9], 10);
+
+          if (isNaN(grade) || isNaN(classNum) || isNaN(number) || !name || isNaN(rp) || isNaN(wins) || isNaN(losses)) {
+            continue; // 유효성 검사 실패 스킵
+          }
+
+          let gender: Gender = "U";
+          if (genderRaw === "남" || genderRaw === "M" || genderRaw === "m" || genderRaw === "남자") gender = "M";
+          if (genderRaw === "여" || genderRaw === "F" || genderRaw === "f" || genderRaw === "여자") gender = "F";
+
+          parsedStudents.push({
+            id: Math.random().toString(36).slice(2, 10), // 새로운 임시 ID 발급
+            grade,
+            classNum,
+            number,
+            name,
+            gender,
+            rp,
+            recent: [], // 복원 시 최근 경기 최근 목록은 빈 배열로 초기화
+            wins,
+            losses
+          });
+        }
+
+        if (parsedStudents.length === 0) {
+          return toast.error("파싱 가능한 유효한 학생 데이터가 없습니다. 순위표 백업 CSV 규격이 맞는지 확인해주세요.");
+        }
+
+        // 파싱된 데이터 보존 및 확인 AlertDialog 개방
+        setPendingRestoreData(parsedStudents);
+        setRestoreDialogOpen(true);
+      } catch (err) {
+        console.error("CSV restore parsing failed:", err);
+        toast.error("CSV 백업 파일을 로드하여 정적 분석하는 중에 오류가 발생했습니다.");
+      }
+    };
+    reader.readAsText(file, "UTF-8");
+    e.target.value = ""; // Input 초기화
   };
 
   // Global reset check
@@ -729,7 +808,7 @@ export function AdminPanel({
       </Card>
 
       {/* 3. CSV Backup Download & Collapsible NEIS Paste */}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-3">
         
         {/* CSV Backup Card */}
         <Card className="border-border/60 bg-card/60 p-5 backdrop-blur shadow-lg flex flex-col justify-between">
@@ -749,6 +828,35 @@ export function AdminPanel({
           >
             <Download className="mr-2 size-4" /> 전체 데이터 CSV 백업 내보내기
           </Button>
+        </Card>
+
+        {/* CSV Restore / Rollback Card */}
+        <Card className="border-border/60 bg-card/60 p-5 backdrop-blur shadow-lg flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-destructive">
+              <RotateCcw className="size-5" />
+              <h3 className="font-bold text-foreground">CSV 업로드하여 데이터 롤백</h3>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+              교사가 이전에 백업해 둔 CSV 파일을 업로드하면, 해당 파일을 기반으로 전체 학생 명단과 RP 및 전적 점수를 완전히 해당 시점의 데이터로 롤백 복원합니다.
+            </p>
+          </div>
+          <div className="mt-5">
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleCSVRestoreUpload} 
+              accept=".csv" 
+              className="hidden" 
+            />
+            <Button
+              onClick={() => fileInputRef.current?.click()}
+              size="lg"
+              className="w-full bg-gradient-to-r from-destructive to-amber-600 text-white font-black tracking-wide shadow-md active:scale-95 transition-all"
+            >
+              <RotateCcw className="mr-2 size-4" /> CSV 데이터 롤백 복원
+            </Button>
+          </div>
         </Card>
 
         {/* Bulk upload toggler */}
@@ -993,6 +1101,44 @@ export function AdminPanel({
           </div>
         </div>
       </Card>
+
+      {/* CSV 롤백 복원 경고 팝업 */}
+      <AlertDialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>
+        <AlertDialogContent className="border-destructive/30 bg-background/95 max-w-md shadow-2xl rounded-2xl backdrop-blur-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-black text-destructive flex items-center gap-2">
+              <ShieldAlert className="size-5 shrink-0" /> 데이터 복구 경고
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-muted-foreground mt-2 leading-relaxed">
+              기존 데이터가 모두 삭제되고 업로드한 파일 기준으로 복구됩니다. 진행하시겠습니까?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-6 gap-2">
+            <AlertDialogCancel 
+              onClick={() => {
+                setRestoreDialogOpen(false);
+                setPendingRestoreData(null);
+              }}
+              className="font-bold border-border/80 text-foreground hover:bg-accent/40 active:scale-95 transition-all rounded-xl h-11 px-5"
+            >
+              취소
+            </AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => {
+                if (pendingRestoreData) {
+                  onRestoreFromCSV?.(pendingRestoreData, []);
+                  toast.success("성공적으로 데이터가 롤백되었습니다!");
+                }
+                setRestoreDialogOpen(false);
+                setPendingRestoreData(null);
+              }}
+              className="font-black bg-destructive hover:bg-destructive/80 active:scale-95 transition-all text-white rounded-xl h-11 px-5 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
+            >
+              진행
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
   );

@@ -15,8 +15,8 @@ import { Crown, Swords, Trophy, Users, Pencil, Target, LogOut, School, ShieldAle
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "초등 배드민턴 리그 · 티어 시스템" },
-      { name: "description", content: "전국 초등학교 체육 수업과 반 대항전을 위한 배드민턴 리그 & 티어 랭킹 시스템." },
+      { title: "초등 스포츠 리그 · 티어 시스템" },
+      { name: "description", content: "전국 초등학교 체육 수업과 반 대항전을 위한 스포츠 리그 & 티어 랭킹 시스템." },
     ],
   }),
   component: Index,
@@ -67,8 +67,10 @@ function Index() {
     if (session) {
       if (session.role === "MASTER") {
         setTab("masterAdmin");
+      } else if (session.role === "STUDENT") {
+        setTab("recommend"); // 학생의 경우 접근 가능한 첫 탭인 매치 추천으로 진입
       } else {
-        setTab("leaderboard");
+        setTab("record"); // 교사의 경우 첫 탭인 경기 기록 입력으로 진입
       }
     }
   }, [session]);
@@ -111,7 +113,6 @@ function Index() {
                 <Crown className="size-5 text-primary-foreground" />
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-neon-blue">Elementary Badminton</p>
                 {editingTitle && session.role !== "STUDENT" ? (
                   <Input
                     autoFocus
@@ -170,7 +171,7 @@ function Index() {
                 ) : (
                   <>
                     <Users className="size-3.5" />
-                    <span>🏸 {session.schoolName} · {session.userName} 학생</span>
+                    <span>🏆 {session.schoolName} · {session.userName} 학생</span>
                   </>
                 )}
               </div>
@@ -184,13 +185,14 @@ function Index() {
                 </div>
               )}
 
-              {/* Logout Button */}
+              {/* Logout Button (Rectangular Style with Text) */}
               <button
                 onClick={logoutUser}
-                className="flex size-8.5 items-center justify-center rounded-full border border-border/60 bg-card/60 text-muted-foreground hover:text-destructive hover:border-destructive/40 active:scale-95 transition-all"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border/60 bg-card/60 text-muted-foreground hover:text-destructive hover:border-destructive/40 active:scale-95 transition-all text-xs font-bold"
                 title="로그아웃"
               >
                 <LogOut className="size-4" />
+                <span>로그아웃</span>
               </button>
 
             </div>
@@ -205,25 +207,27 @@ function Index() {
               </TabButton>
             )}
 
-            {/* Standard Tenant Tabs */}
+            {/* Standard Tenant Tabs (Rearranged) */}
             {session.role !== "MASTER" && (
               <>
-                <TabButton active={tab === "leaderboard"} onClick={() => setTab("leaderboard")} icon={<Trophy className="size-4" />}>
-                  티어 순위표
-                </TabButton>
-                
-                <TabButton active={tab === "recommend"} onClick={() => setTab("recommend")} icon={<Target className="size-4" />}>
-                  🎯 매치 추천
-                </TabButton>
-                
-                {/* Students are blocked from registering scores */}
+                {/* 1. 경기 기록 입력 (교사 전용) */}
                 {session.role !== "STUDENT" && (
                   <TabButton active={tab === "record"} onClick={() => setTab("record")} icon={<Swords className="size-4" />}>
                     경기 기록 입력
                   </TabButton>
                 )}
+
+                {/* 2. 매치 추천 (모든 역할 - 이모티콘 삭제) */}
+                <TabButton active={tab === "recommend"} onClick={() => setTab("recommend")} icon={<Target className="size-4" />}>
+                  매치 추천
+                </TabButton>
+
+                {/* 3. 티어 순위표 (모든 역할) */}
+                <TabButton active={tab === "leaderboard"} onClick={() => setTab("leaderboard")} icon={<Trophy className="size-4" />}>
+                  티어 순위표
+                </TabButton>
                 
-                {/* Students are blocked from teacher admin panels */}
+                {/* 4. 교사 관리자 (교사 전용) */}
                 {session.role !== "STUDENT" && (
                   <TabButton active={tab === "admin"} onClick={() => setTab("admin")} icon={<Users className="size-4" />}>
                     교사 관리자
@@ -293,6 +297,7 @@ function Index() {
                 rpVariables={rpVariables}
                 onUpdateSettings={updateLeagueSettings}
                 onDeleteStudent={deleteStudent}
+                onRestoreFromCSV={restoreFromCSV}
               />
             )}
           </>

@@ -103,9 +103,9 @@ export function LoginPanel({
           <div className="flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-neon-blue to-tier-diamond shadow-[0_0_20px_oklch(0.78_0.18_230/0.45)] mb-3 animate-pulse">
             <Swords className="size-6 text-primary-foreground" />
           </div>
-          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-neon-blue">Elementary Badminton League</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-neon-blue">Elementary Sports League</p>
           <h2 className="text-xl md:text-2xl font-black tracking-tight mt-1 text-foreground">
-            {isRegister ? "체육 교사/학생 회원가입" : "배드민턴 리그전 인증 포털"}
+            {isRegister ? "체육 교사/학생 회원가입" : "스포츠 리그전 인증 포털"}
           </h2>
           <p className="text-xs text-muted-foreground mt-1 max-w-sm">
             {isRegister 
@@ -118,7 +118,7 @@ export function LoginPanel({
         {!isRegister && (
           <div className="grid grid-cols-3 gap-2 bg-background/50 border border-border/40 p-1.5 rounded-xl mb-6 relative z-10">
             <RoleTab active={role === "STUDENT"} onClick={() => setRole("STUDENT")} icon={<Users className="size-3.5" />}>
-              🏸 학생
+              🏆 학생
             </RoleTab>
             <RoleTab active={role === "TEACHER"} onClick={() => setRole("TEACHER")} icon={<Building2 className="size-3.5" />}>
               🏫 교사

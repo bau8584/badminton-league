@@ -56,7 +56,7 @@ export function useLeagueStore() {
   const [hydrated, setHydrated] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
-  const [title, setTitle] = useState<string>("2026 초등 배드민턴 리그전");
+  const [title, setTitle] = useState<string>("2026 초등 리그전");
   const [isLocked, setIsLocked] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
@@ -108,7 +108,7 @@ export function useLeagueStore() {
       const guestSession = {
         loginId: "guest",
         role: "TEACHER" as const, // 교사 전용의 모든 기능(어드민 포함)을 100% 체험 가능
-        schoolName: "배드민턴 꿈나무 초등학교 (체험용)",
+        schoolName: "꿈나무 초등학교 (체험용 스포츠 리그)",
         userName: "게스트 교사",
         scriptUrl: "" // 구글 동기화는 비워둠 (순수 로컬 캐시 구동)
       };
@@ -229,7 +229,7 @@ export function useLeagueStore() {
       // B. 로컬 스토리지 리그 전적 로드
       const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
       const localMatches = loadJSON<Match[]>(MATCHES_KEY, []);
-      const localTitle = loadJSON<string>(TITLE_KEY, "2026 초등 배드민턴 리그전");
+      const localTitle = loadJSON<string>(TITLE_KEY, "2026 초등 리그전");
       const localLocked = loadJSON<boolean>(LOCKED_KEY, false);
 
       const activeStudents = localStudents && localStudents.length > 0 ? localStudents : SEED_STUDENTS;
@@ -585,6 +585,15 @@ export function useLeagueStore() {
     });
   }, [syncWithGoogleSheets, rpVariables]);
 
+  // CSV 롤백 복원 액션
+  const restoreFromCSV = useCallback((restoredStudents: Student[], restoredMatches: Match[]) => {
+    setStudents(restoredStudents);
+    setMatches(restoredMatches);
+    saveJSON(STUDENTS_KEY, restoredStudents);
+    saveJSON(MATCHES_KEY, restoredMatches);
+    syncWithGoogleSheets(restoredStudents, restoredMatches);
+  }, [syncWithGoogleSheets]);
+
   return { 
     hydrated, 
     students, 
@@ -609,6 +618,7 @@ export function useLeagueStore() {
     rpVariables,
     updateLeagueSettings,
     updateStudentGender,
-    deleteStudent
+    deleteStudent,
+    restoreFromCSV
   };
 }
