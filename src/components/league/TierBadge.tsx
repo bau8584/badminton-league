@@ -1,8 +1,8 @@
 import { getTier, TIER_STYLES, type TierName } from "@/lib/league-types";
 import { cn } from "@/lib/utils";
 
-export function TierBadge({ rp }: { rp: number }) {
-  const tier: TierName = getTier(rp);
+export function TierBadge({ rp, thresholds }: { rp: number; thresholds?: Record<TierName, number> }) {
+  const tier: TierName = getTier(rp, thresholds);
   const s = TIER_STYLES[tier];
   return (
     <span

@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
-import type { Student, Match, Gender } from "./league-types";
+import type { Student, Match, Gender, TierName } from "./league-types";
 import { studentKey } from "./league-types";
 
 const STUDENTS_KEY = "bdm.students.v2";
 const MATCHES_KEY = "bdm.matches.v1";
 const TITLE_KEY = "bdm.title.v1";
 const LOCKED_KEY = "bdm.locked.v1";
+const SETTINGS_KEY = "bdm.settings.v1";
 
 // 세션 영속 저장을 위한 로컬스토리지 키
 const SESSION_KEY = "bdm.session.v1";
@@ -61,6 +62,19 @@ export function useLeagueStore() {
 
   // 3대 역할 로그인 세션 상태
   const [session, setSession] = useState<UserSession>(null);
+
+  // 리그전 커스텀 설정 상태 추가
+  const [tierThresholds, setTierThresholds] = useState<Record<TierName, number>>({
+    Bronze: 0,
+    Silver: 1000,
+    Gold: 1200,
+    Platinum: 1400,
+    Diamond: 1600
+  });
+  const [rpVariables, setRpVariables] = useState<{ winDelta: number; loseDelta: number }>({
+    winDelta: 25,
+    loseDelta: 20
+  });
 
   // 1. 구글 스프레드시트 데이터베이스 전체 일괄 동기화 (POST)
   const syncWithGoogleSheets = useCallback(async (currentStudents: Student[], currentMatches: Match[]) => {
@@ -223,6 +237,14 @@ export function useLeagueStore() {
       setMatches(localMatches);
       setTitle(localTitle);
       setIsLocked(localLocked);
+
+      // 설정 로드
+      const localSettings = loadJSON<{ thresholds: Record<TierName, number>; rpVars: { winDelta: number; loseDelta: number } } | null>(SETTINGS_KEY, null);
+      if (localSettings) {
+        if (localSettings.thresholds) setTierThresholds(localSettings.thresholds);
+        if (localSettings.rpVars) setRpVariables(localSettings.rpVars);
+      }
+
       setHydrated(true);
 
       // C. 세션이 살아있는 경우 개인 구글 시트 연동 갱신 (GET)
@@ -258,6 +280,7 @@ export function useLeagueStore() {
   useEffect(() => { if (hydrated) saveJSON(MATCHES_KEY, matches); }, [matches, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(TITLE_KEY, title); }, [title, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(LOCKED_KEY, isLocked); }, [isLocked, hydrated]);
+  useEffect(() => { if (hydrated) saveJSON(SETTINGS_KEY, { thresholds: tierThresholds, rpVars: rpVariables }); }, [tierThresholds, rpVariables, hydrated]);
 
   // 경기 기록 및 동기화
   const recordMatch = useCallback((playerAId: string, playerBId: string, scoreA: number, scoreB: number) => {
@@ -276,7 +299,7 @@ export function useLeagueStore() {
         if (s.id !== playerAId && s.id !== playerBId) return s;
         const isA = s.id === playerAId;
         const won = isA ? aWon : !aWon;
-        const delta = won ? 25 : -20;
+        const delta = won ? rpVariables.winDelta : -rpVariables.loseDelta;
         return {
           ...s,
           rp: Math.max(0, s.rp + delta),
@@ -289,7 +312,7 @@ export function useLeagueStore() {
       syncWithGoogleSheets(nextStudents, nextMatches);
       return nextStudents;
     });
-  }, [syncWithGoogleSheets]);
+  }, [syncWithGoogleSheets, rpVariables]);
 
   // 경기 삭제(롤백) 및 동기화
   const deleteMatch = useCallback((matchId: string) => {
@@ -310,7 +333,7 @@ export function useLeagueStore() {
           const isA = s.id === playerAId;
           const won = isA ? aWon : !aWon;
           
-          const rpDelta = won ? -25 : 20;
+          const rpDelta = won ? -rpVariables.winDelta : rpVariables.loseDelta;
           const newRp = Math.max(0, s.rp + rpDelta);
           const newWins = Math.max(0, s.wins - (won ? 1 : 0));
           const newLosses = Math.max(0, s.losses - (won ? 0 : 1));
@@ -342,7 +365,7 @@ export function useLeagueStore() {
 
       return nextMatches;
     });
-  }, [syncWithGoogleSheets]);
+  }, [syncWithGoogleSheets, rpVariables]);
 
   // 개별 학생 전적 리셋 및 동기화
   const resetStudent = useCallback((studentId: string) => {
@@ -483,6 +506,85 @@ export function useLeagueStore() {
     [matches, syncWithGoogleSheets],
   );
 
+  // 리그전 커스텀 설정 캘리브레이션 업데이트 함수
+  const updateLeagueSettings = useCallback((thresholds: Record<TierName, number>, rpVars: { winDelta: number; loseDelta: number }) => {
+    setTierThresholds(thresholds);
+    setRpVariables(rpVars);
+  }, []);
+
+  // 특정 학생의 성별 변경 및 구글 시트 동기화
+  const updateStudentGender = useCallback((studentId: string, gender: Gender) => {
+    setStudents((prev) => {
+      const nextStudents = prev.map((s) => {
+        if (s.id !== studentId) return s;
+        return { ...s, gender };
+      });
+      syncWithGoogleSheets(nextStudents, matches);
+      return nextStudents;
+    });
+  }, [matches, syncWithGoogleSheets]);
+
+  // 개별 학생 삭제 및 연쇄 삭제 & 전적 복구 롤백
+  const deleteStudent = useCallback((studentId: string) => {
+    setMatches((prevMatches) => {
+      const matchesToRemove = prevMatches.filter((m) => m.playerAId === studentId || m.playerBId === studentId);
+      const nextMatches = prevMatches.filter((m) => m.playerAId !== studentId && m.playerBId !== studentId);
+
+      setStudents((prevStudents) => {
+        // 1. 삭제할 학생 제외
+        let nextStudents = prevStudents.filter((s) => s.id !== studentId);
+
+        // 2. 삭제되는 경기들의 상대방 전적 복구
+        matchesToRemove.forEach((m) => {
+          const opponentId = m.playerAId === studentId ? m.playerBId : m.playerAId;
+          const isOpponentA = m.playerAId === opponentId;
+          const oppWon = isOpponentA ? (m.scoreA > m.scoreB) : (m.scoreB > m.scoreA);
+
+          nextStudents = nextStudents.map((s) => {
+            if (s.id !== opponentId) return s;
+            
+            const rpDelta = oppWon ? -rpVariables.winDelta : rpVariables.loseDelta;
+            const newRp = Math.max(0, s.rp + rpDelta);
+            const newWins = Math.max(0, s.wins - (oppWon ? 1 : 0));
+            const newLosses = Math.max(0, s.losses - (oppWon ? 0 : 1));
+
+            return {
+              ...s,
+              rp: newRp,
+              wins: newWins,
+              losses: newLosses,
+            };
+          });
+        });
+
+        // 3. 상대방들의 recent 배열 재구성
+        nextStudents = nextStudents.map((s) => {
+          const sMatches = nextMatches
+            .filter((m) => m.playerAId === s.id || m.playerBId === s.id)
+            .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
+            .slice(0, 5);
+
+          const newRecent = sMatches.map((m) => {
+            const mIsA = m.playerAId === s.id;
+            const mAWon = m.scoreA > m.scoreB;
+            const mWon = mIsA ? mAWon : !mAWon;
+            return mWon ? "W" : "L";
+          });
+
+          return {
+            ...s,
+            recent: newRecent,
+          };
+        });
+
+        syncWithGoogleSheets(nextStudents, nextMatches);
+        return nextStudents;
+      });
+
+      return nextMatches;
+    });
+  }, [syncWithGoogleSheets, rpVariables]);
+
   return { 
     hydrated, 
     students, 
@@ -502,6 +604,11 @@ export function useLeagueStore() {
     loginUser,
     registerUser,
     logoutUser,
-    MASTER_API_URL
+    MASTER_API_URL,
+    tierThresholds,
+    rpVariables,
+    updateLeagueSettings,
+    updateStudentGender,
+    deleteStudent
   };
 }

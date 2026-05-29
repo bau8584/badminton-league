@@ -20,7 +20,7 @@ function getWinStreak(recent: ("W" | "L")[]): number {
   return count;
 }
 
-export function Leaderboard({ students }: { students: Student[] }) {
+export function Leaderboard({ students, thresholds }: { students: Student[]; thresholds?: Record<TierName, number> }) {
   const [grade, setGrade] = useState<number | "all">("all");
   const [classNum, setClassNum] = useState<number | "all">("all");
   const [tier, setTier] = useState<TierName | "all">("all");
@@ -39,11 +39,11 @@ export function Leaderboard({ students }: { students: Student[] }) {
     return students
       .filter((s) => (grade === "all" ? true : s.grade === grade))
       .filter((s) => (classNum === "all" ? true : s.classNum === classNum))
-      .filter((s) => (tier === "all" ? true : getTier(s.rp) === tier))
+      .filter((s) => (tier === "all" ? true : getTier(s.rp, thresholds) === tier))
       .filter((s) => (gender === "all" ? true : s.gender === gender))
       .filter((s) => (q ? s.name.toLowerCase().includes(q) : true))
       .sort((a, b) => b.rp - a.rp);
-  }, [students, grade, classNum, tier, gender, query]);
+  }, [students, grade, classNum, tier, gender, query, thresholds]);
 
   return (
     <div className="space-y-5">
@@ -149,7 +149,7 @@ export function Leaderboard({ students }: { students: Student[] }) {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3"><TierBadge rp={s.rp} /></td>
+                    <td className="px-4 py-3"><TierBadge rp={s.rp} thresholds={thresholds} /></td>
                     <td className="px-4 py-3 text-right font-mono font-bold text-neon-blue text-glow-blue">{s.rp}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1">

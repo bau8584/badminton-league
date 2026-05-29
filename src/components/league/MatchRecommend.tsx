@@ -38,6 +38,7 @@ export function MatchRecommend({
   onTargetGradeChange: (g: number | null) => void;
   targetClass: number | null;
   onTargetClassChange: (c: number | null) => void;
+  thresholds?: Record<string, number>;
 }) {
   const player = students.find((s) => s.id === sel.studentId) ?? null;
 
@@ -265,7 +266,7 @@ export function MatchRecommend({
                 {player.name}
               </div>
               <div className="mt-2.5 flex items-center gap-2">
-                <TierBadge rp={player.rp} />
+                <TierBadge rp={player.rp} thresholds={thresholds} />
                 <span className="font-mono text-xs text-neon-blue font-bold">{player.rp} RP</span>
                 <span className="text-xs text-muted-foreground">({player.wins}승 {player.losses}패)</span>
               </div>
@@ -628,7 +629,7 @@ export function MatchRecommend({
 
                         {/* Current Tier & RP */}
                         <div className="mt-3 flex items-center gap-2">
-                          <TierBadge rp={s.rp} />
+                          <TierBadge rp={s.rp} thresholds={thresholds} />
                           <span className="font-mono text-sm text-neon-blue font-bold">{s.rp} RP</span>
                           <span className="text-xs text-muted-foreground font-medium">({s.wins}승 {s.losses}패)</span>
                         </div>

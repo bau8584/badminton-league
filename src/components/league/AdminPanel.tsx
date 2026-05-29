@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,11 +17,22 @@ import {
   ShieldAlert,
   Save
 } from "lucide-react";
-import type { Gender, Student, Match } from "@/lib/league-types";
+import type { Gender, Student, Match, TierName } from "@/lib/league-types";
 import { getTier, TIER_STYLES } from "@/lib/league-types";
 import { GenderMark } from "./GenderMark";
 import { TierBadge } from "./TierBadge";
 import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 type Row = { grade: number; classNum: number; number: number; name: string; gender?: Gender };
 
@@ -70,6 +81,10 @@ export function AdminPanel({
   onResetStudent,
   onResetAll,
   onUpdateRP,
+  thresholds,
+  rpVariables,
+  onUpdateSettings,
+  onDeleteStudent,
 }: {
   students: Student[];
   matches: Match[];
@@ -81,6 +96,10 @@ export function AdminPanel({
   onResetStudent: (studentId: string) => void;
   onResetAll: () => void;
   onUpdateRP: (studentId: string, nextRp: number) => void;
+  thresholds?: Record<TierName, number>;
+  rpVariables?: { winDelta: number; loseDelta: number };
+  onUpdateSettings?: (thresholds: Record<TierName, number>, rpVars: { winDelta: number; loseDelta: number }) => void;
+  onDeleteStudent?: (studentId: string) => void;
 }) {
   // Bulk upload states
   const [text, setText] = useState("");
@@ -91,6 +110,78 @@ export function AdminPanel({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [editRpInput, setEditRpInput] = useState<string>("");
+
+  // 학년/반 대형 필터 브라우저 상태
+  const [filterGrade, setFilterGrade] = useState<number | null>(null);
+  const [filterClassNum, setFilterClassNum] = useState<number | null>(null);
+
+  // 티어 및 RP 수동 설정 폼 상태
+  const [inputBronze, setInputBronze] = useState(thresholds?.Bronze?.toString() ?? "0");
+  const [inputSilver, setInputSilver] = useState(thresholds?.Silver?.toString() ?? "1000");
+  const [inputGold, setInputGold] = useState(thresholds?.Gold?.toString() ?? "1200");
+  const [inputPlatinum, setInputPlatinum] = useState(thresholds?.Platinum?.toString() ?? "1400");
+  const [inputDiamond, setInputDiamond] = useState(thresholds?.Diamond?.toString() ?? "1600");
+
+  const [inputWinDelta, setInputWinDelta] = useState(rpVariables?.winDelta?.toString() ?? "25");
+  const [inputLoseDelta, setInputLoseDelta] = useState(rpVariables?.loseDelta?.toString() ?? "20");
+
+  useEffect(() => {
+    if (thresholds) {
+      setInputBronze(thresholds.Bronze?.toString() ?? "0");
+      setInputSilver(thresholds.Silver?.toString() ?? "1000");
+      setInputGold(thresholds.Gold?.toString() ?? "1200");
+      setInputPlatinum(thresholds.Platinum?.toString() ?? "1400");
+      setInputDiamond(thresholds.Diamond?.toString() ?? "1600");
+    }
+  }, [thresholds]);
+
+  useEffect(() => {
+    if (rpVariables) {
+      setInputWinDelta(rpVariables.winDelta?.toString() ?? "25");
+      setInputLoseDelta(rpVariables.loseDelta?.toString() ?? "20");
+    }
+  }, [rpVariables]);
+
+  const handleSaveSettings = () => {
+    const b = parseInt(inputBronze, 10);
+    const s = parseInt(inputSilver, 10);
+    const g = parseInt(inputGold, 10);
+    const p = parseInt(inputPlatinum, 10);
+    const d = parseInt(inputDiamond, 10);
+
+    const winD = parseInt(inputWinDelta, 10);
+    const loseD = parseInt(inputLoseDelta, 10);
+
+    if (isNaN(b) || isNaN(s) || isNaN(g) || isNaN(p) || isNaN(d) || isNaN(winD) || isNaN(loseD)) {
+      return toast.error("모든 설정값은 유효한 정수여야 합니다.");
+    }
+
+    if (b < 0 || s < 0 || g < 0 || p < 0 || d < 0 || winD < 0 || loseD < 0) {
+      return toast.error("점수 설정은 0점 이상이어야 합니다.");
+    }
+
+    onUpdateSettings?.(
+      { Bronze: b, Silver: s, Gold: g, Platinum: p, Diamond: d },
+      { winDelta: winD, loseDelta: loseD }
+    );
+    toast.success("티어 기준 및 RP 변동폭 설정이 리그 전체에 즉시 반영되었습니다!");
+  };
+
+  // 한 학급에 속한 학생들 목록 필터링
+  const classFilteredStudents = useMemo(() => {
+    if (filterGrade == null || filterClassNum == null) return [];
+    return students
+      .filter((s) => s.grade === filterGrade && s.classNum === filterClassNum)
+      .sort((a, b) => a.number - b.number);
+  }, [students, filterGrade, filterClassNum]);
+  
+  // 해당 학년에서 실제로 존재하는 반들을 추출
+  const availableClassesForFilter = useMemo(() => {
+    if (filterGrade == null) return [];
+    const set = new Set<number>();
+    students.filter((s) => s.grade === filterGrade).forEach((s) => set.add(s.classNum));
+    return Array.from(set).sort((a, b) => a - b);
+  }, [students, filterGrade]);
 
   const selectedStudent = useMemo(() => {
     return students.find((s) => s.id === selectedStudentId) ?? null;
@@ -160,7 +251,7 @@ export function AdminPanel({
     const rows = sortedStudents.map((s, index) => {
       const total = s.wins + s.losses;
       const winRate = total === 0 ? 0 : Math.round((s.wins / total) * 100);
-      const tierLabel = TIER_STYLES[getTier(s.rp)].label;
+      const tierLabel = TIER_STYLES[getTier(s.rp, thresholds)].label;
       const genderLabel = s.gender === "M" ? "남" : s.gender === "F" ? "여" : "미지정";
       
       return [
@@ -313,7 +404,7 @@ export function AdminPanel({
                         <span className="text-xs text-muted-foreground">({s.grade}학년 {s.classNum}반 {s.number}번)</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <TierBadge rp={s.rp} />
+                        <TierBadge rp={s.rp} thresholds={thresholds} />
                         <span className="font-mono text-xs text-neon-blue font-bold">{s.rp} RP</span>
                       </div>
                     </button>
@@ -325,6 +416,146 @@ export function AdminPanel({
             </Card>
           )}
         </div>
+
+        {/* Grade/Class Selector with Double Scale for Touch Ergonomics */}
+        <div className="rounded-xl border border-border/40 bg-muted/10 p-5 mt-4 space-y-5">
+          <div>
+            <span className="text-xs text-neon-blue font-bold uppercase tracking-wider">학년 선택 (Touch 2x)</span>
+            <div className="flex flex-wrap gap-3 mt-2">
+              {[1, 2, 3, 4, 5, 6].map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => {
+                    setFilterGrade(g);
+                    setFilterClassNum(null);
+                  }}
+                  className={cn(
+                    "w-16 h-16 rounded-2xl text-xl font-black transition-all active:scale-95 flex items-center justify-center border shadow-md",
+                    filterGrade === g
+                      ? "border-neon-blue bg-neon-blue/20 text-neon-blue shadow-[0_0_18px_rgba(0,180,216,0.3)]"
+                      : "border-border/60 bg-background/50 text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                  )}
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filterGrade != null && (
+            <div className="animate-in fade-in duration-300">
+              <span className="text-xs text-neon-green font-bold uppercase tracking-wider">반 선택 (Touch 2x)</span>
+              <div className="flex flex-wrap gap-3 mt-2">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].filter((c) => availableClassesForFilter.includes(c)).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setFilterClassNum(c)}
+                    className={cn(
+                      "w-16 h-16 rounded-2xl text-xl font-black transition-all active:scale-95 flex items-center justify-center border shadow-md",
+                      filterClassNum === c
+                        ? "border-neon-green bg-neon-green/20 text-neon-green shadow-[0_0_18px_rgba(34,197,94,0.3)]"
+                        : "border-border/60 bg-background/50 text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                    )}
+                  >
+                    {c}
+                  </button>
+                ))}
+                {availableClassesForFilter.length === 0 && (
+                  <span className="text-xs text-muted-foreground py-2 block">해당 학년에 등록된 학생이 없습니다. 명렬표를 등록해주세요.</span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Class Students Roster Grid Card */}
+        {filterGrade != null && filterClassNum != null && (
+          <div className="mt-5 pt-4 border-t border-border/30 animate-in fade-in duration-300">
+            <span className="text-xs text-muted-foreground font-bold uppercase tracking-wider block mb-2">
+              학급 명단 브라우저 ({filterGrade}학년 {filterClassNum}반 · {classFilteredStudents.length}명)
+            </span>
+            
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {classFilteredStudents.map((s) => (
+                <Card 
+                  key={s.id} 
+                  className={cn(
+                    "p-4 border border-border/40 bg-background/40 hover:bg-accent/10 hover:border-neon-blue/40 transition-all duration-200 cursor-pointer flex items-center justify-between group relative overflow-hidden",
+                    selectedStudentId === s.id && "border-neon-blue bg-neon-blue/5 shadow-[0_0_15px_rgba(0,180,216,0.1)]"
+                  )}
+                  onClick={() => handleSelectStudent(s)}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-sm font-bold text-muted-foreground bg-muted/40 size-8 rounded-full flex items-center justify-center shrink-0">
+                      {s.number}
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <GenderMark gender={s.gender} />
+                        <span>{s.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <TierBadge rp={s.rp} thresholds={thresholds} />
+                        <span className="font-mono text-[11px] text-neon-blue font-bold">{s.rp} RP</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Delete Student Button wrapped in AlertDialog trigger */}
+                  <div className="flex items-center gap-1 relative z-20" onClick={(e) => e.stopPropagation()}>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-9 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 opacity-80 hover:opacity-100 transition-all"
+                          title="선수 삭제"
+                        >
+                          <Trash2 className="size-4.5" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent className="border-destructive/30 bg-background/95 max-w-md shadow-2xl rounded-2xl backdrop-blur-xl">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="text-xl font-black text-destructive flex items-center gap-2">
+                            <ShieldAlert className="size-5 shrink-0" /> 정말 학생을 삭제하시겠습니까?
+                          </AlertDialogTitle>
+                          <AlertDialogDescription className="text-sm text-muted-foreground mt-2 leading-relaxed">
+                            정말 <span className="font-black text-foreground">[{s.name}] ({s.grade}학년 {s.classNum}반 {s.number}번)</span> 학생의 모든 데이터를 영구 삭제하시겠습니까?<br /><br />
+                            이 학생이 치른 <span className="font-bold text-destructive">모든 과거 경기 기록도 자동으로 제거</span>되며, 상대방 학생들의 승패와 RP 수치도 경기 전 상태로 부분 롤백됩니다. 이 작업은 되돌릴 수 없습니다.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter className="mt-6 gap-2">
+                          <AlertDialogCancel className="font-bold border-border/80 text-foreground hover:bg-accent/40 active:scale-95 transition-all rounded-xl h-11 px-5">
+                            취소
+                          </AlertDialogCancel>
+                          <AlertDialogAction 
+                            onClick={() => {
+                              onDeleteStudent?.(s.id);
+                              if (selectedStudentId === s.id) {
+                                setSelectedStudentId(null);
+                              }
+                              toast.success(`[${s.name}] 학생 및 연계 경기 전적이 리그에서 성공적으로 완전 삭제되었습니다.`);
+                            }}
+                            className="font-black bg-destructive hover:bg-destructive/80 active:scale-95 transition-all text-white rounded-xl h-11 px-5 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
+                          >
+                            예, 안전 삭제합니다
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </Card>
+              ))}
+              {classFilteredStudents.length === 0 && (
+                <div className="col-span-full py-6 text-center text-xs text-muted-foreground border border-dashed border-border/30 rounded-xl bg-muted/5">
+                  선택하신 학급에 등록된 학생이 없습니다.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Student Detail Panel */}
         {selectedStudent ? (
@@ -347,7 +578,7 @@ export function AdminPanel({
                 </div>
 
                 <div className="mt-3 flex items-center gap-2 flex-wrap">
-                  <TierBadge rp={selectedStudent.rp} />
+                  <TierBadge rp={selectedStudent.rp} thresholds={thresholds} />
                   <span className="font-mono text-sm font-bold text-neon-blue">{selectedStudent.rp} RP</span>
                   <span className="text-xs text-muted-foreground">({selectedStudent.wins}승 {selectedStudent.losses}패)</span>
                 </div>
@@ -613,6 +844,128 @@ export function AdminPanel({
           </Button>
         </Card>
       )}
+
+      {/* 3.5. League Settings Calibration: Custom Tier Thresholds & RP Deltas */}
+      <Card className="border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl">
+        <div className="mb-4">
+          <div className="flex items-center gap-2 text-neon-blue">
+            <Save className="size-5" />
+            <h3 className="font-black text-lg">티어 및 RP 설정 (League Settings Calibration)</h3>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            티어 등급별 최소 진입 RP 커트라인 기준점과 경기 승/패 시 가감되는 기본 변동 RP 점수를 자유롭게 미세 조율하여 리그 밸런스를 커스텀 설정합니다.
+          </p>
+        </div>
+
+        <div className="space-y-6 pt-2">
+          {/* Tier Thresholds Inputs Group */}
+          <div>
+            <span className="text-xs text-neon-blue font-bold uppercase tracking-wider block mb-3">티어별 최저 RP 기준점 (Tier Cutoffs)</span>
+            <div className="grid gap-3 grid-cols-2 sm:grid-cols-5">
+              {/* Bronze */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-tier-bronze block">브론즈</label>
+                <Input
+                  type="number"
+                  value={inputBronze}
+                  onChange={(e) => setInputBronze(e.target.value)}
+                  className="font-mono font-bold bg-background/60 border-tier-bronze/30 text-tier-bronze focus-visible:ring-tier-bronze"
+                />
+              </div>
+
+              {/* Silver */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-tier-silver block">실버</label>
+                <Input
+                  type="number"
+                  value={inputSilver}
+                  onChange={(e) => setInputSilver(e.target.value)}
+                  className="font-mono font-bold bg-background/60 border-tier-silver/30 text-tier-silver focus-visible:ring-tier-silver"
+                />
+              </div>
+
+              {/* Gold */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-tier-gold block">골드</label>
+                <Input
+                  type="number"
+                  value={inputGold}
+                  onChange={(e) => setInputGold(e.target.value)}
+                  className="font-mono font-bold bg-background/60 border-tier-gold/30 text-tier-gold focus-visible:ring-tier-gold"
+                />
+              </div>
+
+              {/* Platinum */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-tier-platinum block">플래티넘</label>
+                <Input
+                  type="number"
+                  value={inputPlatinum}
+                  onChange={(e) => setInputPlatinum(e.target.value)}
+                  className="font-mono font-bold bg-background/60 border-tier-platinum/30 text-tier-platinum focus-visible:ring-tier-platinum"
+                />
+              </div>
+
+              {/* Diamond */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-tier-diamond block">다이아몬드</label>
+                <Input
+                  type="number"
+                  value={inputDiamond}
+                  onChange={(e) => setInputDiamond(e.target.value)}
+                  className="font-mono font-bold bg-background/60 border-tier-diamond/30 text-tier-diamond focus-visible:ring-tier-diamond"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* RP Deltas Inputs Group */}
+          <div className="border-t border-border/30 pt-4">
+            <span className="text-xs text-neon-green font-bold uppercase tracking-wider block mb-3">승/패 RP 변동폭 설정 (Delta Variables)</span>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {/* Win Delta */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold text-win">경기 이겼을 때 상승 RP</label>
+                  <span className="text-[10px] text-muted-foreground font-mono">(기본값: +25)</span>
+                </div>
+                <Input
+                  type="number"
+                  value={inputWinDelta}
+                  onChange={(e) => setInputWinDelta(e.target.value)}
+                  className="font-mono font-bold bg-background/60 border-win/30 text-win focus-visible:ring-win"
+                  placeholder="예: 25"
+                />
+              </div>
+
+              {/* Lose Delta */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold text-loss">경기 졌을 때 하락 RP</label>
+                  <span className="text-[10px] text-muted-foreground font-mono">(기본값: -20)</span>
+                </div>
+                <Input
+                  type="number"
+                  value={inputLoseDelta}
+                  onChange={(e) => setInputLoseDelta(e.target.value)}
+                  className="font-mono font-bold bg-background/60 border-loss/30 text-loss focus-visible:ring-loss"
+                  placeholder="예: 20"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Save Button */}
+          <div className="pt-2">
+            <Button
+              onClick={handleSaveSettings}
+              className="w-full bg-gradient-to-r from-neon-blue to-neon-green text-primary-foreground font-black tracking-wide h-12 shadow-lg active:scale-95 transition-all"
+            >
+              <Save className="size-4.5 mr-2" /> 캘리브레이션 리그 설정 저장 및 반영
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       {/* 4. Danger Zone: Global Reset with Password Verification */}
       <Card className="border border-destructive/40 bg-destructive/5 p-5 backdrop-blur shadow-lg">

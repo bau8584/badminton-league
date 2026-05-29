@@ -24,11 +24,12 @@ export type Match = {
 
 export type TierName = "Bronze" | "Silver" | "Gold" | "Platinum" | "Diamond";
 
-export function getTier(rp: number): TierName {
-  if (rp >= 1600) return "Diamond";
-  if (rp >= 1400) return "Platinum";
-  if (rp >= 1200) return "Gold";
-  if (rp >= 1000) return "Silver";
+export function getTier(rp: number, thresholds?: Record<TierName, number>): TierName {
+  const t = thresholds || { Bronze: 0, Silver: 1000, Gold: 1200, Platinum: 1400, Diamond: 1600 };
+  if (rp >= (t.Diamond ?? 1600)) return "Diamond";
+  if (rp >= (t.Platinum ?? 1400)) return "Platinum";
+  if (rp >= (t.Gold ?? 1200)) return "Gold";
+  if (rp >= (t.Silver ?? 1000)) return "Silver";
   return "Bronze";
 }
 

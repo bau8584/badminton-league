@@ -44,7 +44,12 @@ function Index() {
     loginUser,
     registerUser,
     logoutUser,
-    MASTER_API_URL
+    MASTER_API_URL,
+    tierThresholds,
+    rpVariables,
+    updateLeagueSettings,
+    updateStudentGender,
+    deleteStudent
   } = useLeagueStore();
 
   const [tab, setTab] = useState<Tab>("leaderboard");
@@ -240,7 +245,7 @@ function Index() {
         {/* Tenant Panels */}
         {session.role !== "MASTER" && (
           <>
-            {tab === "leaderboard" && <Leaderboard students={students} />}
+            {tab === "leaderboard" && <Leaderboard students={students} thresholds={tierThresholds} />}
             
             {tab === "recommend" && (
               <MatchRecommend
@@ -255,6 +260,7 @@ function Index() {
                 onTargetGradeChange={setRecommendTargetGrade}
                 targetClass={recommendTargetClass}
                 onTargetClassChange={setRecommendTargetClass}
+                thresholds={tierThresholds}
               />
             )}
             
@@ -265,6 +271,9 @@ function Index() {
                 isLocked={isLocked}
                 initials={recommendInitials}
                 onClearInitials={() => setRecommendInitials(null)}
+                thresholds={tierThresholds}
+                rpVariables={rpVariables}
+                onUpdateGender={updateStudentGender}
               />
             )}
             
@@ -280,6 +289,10 @@ function Index() {
                 onResetStudent={resetStudent}
                 onResetAll={resetAllData}
                 onUpdateRP={updateStudentRP}
+                thresholds={tierThresholds}
+                rpVariables={rpVariables}
+                onUpdateSettings={updateLeagueSettings}
+                onDeleteStudent={deleteStudent}
               />
             )}
           </>
