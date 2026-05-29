@@ -520,7 +520,7 @@ function PlayerSelector({
             <div className="flex flex-wrap gap-3 mt-2">
               {GRADES.map((g) => (
                 <Chip key={g} active={value.grade === g} accent={accent} onClick={() => onChange({ grade: g, classNum: null, studentId: null })}>
-                  {g}
+                  {g}학년
                 </Chip>
               ))}
             </div>
@@ -530,7 +530,7 @@ function PlayerSelector({
               <div className="flex flex-wrap gap-3 mt-2">
                 {CLASSES.filter((c) => classes.includes(c)).map((c) => (
                   <Chip key={c} active={value.classNum === c} accent={accent} onClick={() => onChange({ ...value, classNum: c, studentId: null })}>
-                    {c}
+                    {c}반
                   </Chip>
                 ))}
                 {classes.length === 0 && <span className="text-xs text-muted-foreground block py-2">학생이 없습니다</span>}
@@ -565,8 +565,7 @@ function PlayerSelector({
 function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-2 flex items-center gap-2 text-xs font-bold text-muted-foreground">
-        <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[10px]">{n}</span>
+      <div className="mb-2 flex items-center gap-2 text-2xl font-extrabold text-muted-foreground">
         {title}
       </div>
       {children}
@@ -583,7 +582,7 @@ function Chip({ active, accent, onClick, children }: { active: boolean; accent: 
       type="button"
       onClick={onClick}
       className={cn(
-        "w-16 h-16 rounded-2xl border text-xl font-black transition-all active:scale-95 flex items-center justify-center shadow-md",
+        "w-20 h-16 rounded-2xl border text-base font-black transition-all active:scale-95 flex items-center justify-center shadow-md",
         active ? activeCls : "border-border/60 bg-card/40 text-muted-foreground hover:text-foreground hover:bg-muted/30",
       )}
     >

@@ -49,7 +49,8 @@ function Index() {
     rpVariables,
     updateLeagueSettings,
     updateStudentGender,
-    deleteStudent
+    deleteStudent,
+    restoreFromCSV
   } = useLeagueStore();
 
   const [tab, setTab] = useState<Tab>("leaderboard");
