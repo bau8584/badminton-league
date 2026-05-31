@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { TierBadge } from "./TierBadge";
 import { GenderMark } from "./GenderMark";
 import { cn } from "@/lib/utils";
-import { Trophy, X, Lock } from "lucide-react";
+import { Trophy, X, Lock, Sparkles } from "lucide-react";
 import type { Student } from "@/lib/league-types";
 import { getTier, TIER_ORDER } from "@/lib/league-types";
 import { toast } from "sonner";
