@@ -255,7 +255,7 @@ export function LoginPanel({
                   required
                   value={regSchoolName}
                   onChange={(e) => setRegSchoolName(e.target.value)}
-                  placeholder="정확한 학교 명칭 입력 (예: 청림초등학교)"
+                  placeholder="정확한 학교 명칭 입력 (예: 대한초등학교)"
                   className="h-10 border-border/60 bg-background/40 focus:border-neon-blue transition-all"
                 />
               </div>
@@ -342,7 +342,7 @@ export function LoginPanel({
                   required
                   value={schoolName}
                   onChange={(e) => setSchoolName(e.target.value)}
-                  placeholder="학교 이름을 입력하세요 (예: 청림초등학교)"
+                  placeholder="학교 이름을 입력하세요 (예: 대한초 또는 대한초등학교)"
                   className="h-10 border-border/60 bg-background/40 hover:border-neon-blue/60 focus:border-neon-blue focus:ring-1 focus:ring-neon-blue transition-all"
                 />
               </div>

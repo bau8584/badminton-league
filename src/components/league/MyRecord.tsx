@@ -166,10 +166,6 @@ export function MyRecord({
                   <GenderMark gender={me.gender} />
                   <span>{me.name}</span>
                 </CardTitle>
-                <CardDescription className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                  <Users className="size-3.5" />
-                  {me.grade}학년 {me.classNum}반 · 출석 번호 {me.number}번
-                </CardDescription>
               </div>
               <TierBadge rp={me.rp} thresholds={thresholds} />
             </div>

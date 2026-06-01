@@ -70,18 +70,18 @@ function Index() {
       if (session.role === "MASTER") {
         setTab("masterAdmin");
       } else if (session.role === "STUDENT") {
-        setTab("recommend"); // 학생의 경우 접근 가능한 첫 탭인 매치 추천으로 진입
+        setTab("myRecord"); // 학생의 경우 첫 탭인 나의 기록으로 진입
       } else {
         setTab("record"); // 교사의 경우 첫 탭인 경기 기록 입력으로 진입
       }
     }
   }, [session]);
 
-  // 학생 탭 접근 통제 보안 가드 (오직 recommend 와 myRecord 탭만 허용)
+  // 학생 탭 접근 통제 보안 가드 (오직 myRecord 와 recommend 탭만 허용)
   useEffect(() => {
     if (session && session.role === "STUDENT") {
       if (tab !== "recommend" && tab !== "myRecord") {
-        setTab("recommend");
+        setTab("myRecord");
       }
     }
   }, [session, tab]);
@@ -223,14 +223,14 @@ function Index() {
               <>
                 {session.role === "STUDENT" ? (
                   <>
-                    {/* 1. 매치 추천 (학생) */}
-                    <TabButton active={tab === "recommend"} onClick={() => setTab("recommend")} icon={<Target className="size-4" />}>
-                      매치 추천
-                    </TabButton>
-
-                    {/* 2. 나의 기록 (학생 - 신규) */}
+                    {/* 1. 나의 기록 (학생 - 신규) */}
                     <TabButton active={tab === "myRecord"} onClick={() => setTab("myRecord")} icon={<Trophy className="size-4" />}>
                       나의 기록
+                    </TabButton>
+
+                    {/* 2. 매치 추천 (학생) */}
+                    <TabButton active={tab === "recommend"} onClick={() => setTab("recommend")} icon={<Target className="size-4" />}>
+                      매치 추천
                     </TabButton>
                   </>
                 ) : (
