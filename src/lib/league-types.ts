@@ -11,6 +11,8 @@ export type Student = {
   recent: ("W" | "L")[]; // most recent first, max 5
   wins: number;
   losses: number;
+  demotionShields?: number; // 횟수제 강등 보호막 (기본값 0)
+  lastMatchDate?: string;   // 마지막으로 경기를 치른 날짜 (ISO 8601 형식)
 };
 
 export type Match = {

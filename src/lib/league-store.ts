@@ -1,6 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
 import type { Student, Match, Gender, TierName } from "./league-types";
-import { studentKey } from "./league-types";
+import { studentKey, getTier } from "./league-types";
+
+const TIER_RANKING: Record<TierName, number> = {
+  Bronze: 1,
+  Silver: 2,
+  Gold: 3,
+  Platinum: 4,
+  Diamond: 5
+};
 
 const STUDENTS_KEY = "bdm.students.v2";
 const MATCHES_KEY = "bdm.matches.v1";
@@ -509,19 +517,50 @@ export function useLeagueStore() {
         const isA = s.id === playerAId;
         const won = isA ? aWon : !aWon;
         const delta = isA ? deltaA : deltaB;
+
+        const preRp = s.rp;
+        const preTier = getTier(preRp, tierThresholds);
+        const preTierRank = TIER_RANKING[preTier] ?? 1;
+
+        let nextRp = preRp + delta;
+        let nextShields = s.demotionShields ?? 0;
+
+        if (won) {
+          const tentativeTier = getTier(nextRp, tierThresholds);
+          const tentativeTierRank = TIER_RANKING[tentativeTier] ?? 1;
+          if (tentativeTierRank > preTierRank) {
+            nextShields = 3; // 승급 시 방어막 3회 완충
+          }
+          nextRp = Math.max(0, nextRp);
+        } else {
+          const minThreshold = tierThresholds[preTier] ?? 0;
+          if (nextRp < minThreshold && preTier !== "Bronze") {
+            if (nextShields >= 1) {
+              nextRp = minThreshold; // 강등 방어막 가동 (티어 최하단선으로 락인)
+              nextShields = nextShields - 1;
+            } else {
+              nextRp = Math.max(0, nextRp); // 방어막이 소진되어 강등
+            }
+          } else {
+            nextRp = Math.max(0, nextRp);
+          }
+        }
+
         return {
           ...s,
-          rp: Math.max(0, s.rp + delta),
+          rp: nextRp,
           wins: s.wins + (won ? 1 : 0),
           losses: s.losses + (won ? 0 : 1),
           recent: [(won ? "W" : "L") as "W" | "L", ...s.recent].slice(0, 5),
+          demotionShields: nextShields,
+          lastMatchDate: new Date().toISOString(),
         };
       });
 
       syncWithGoogleSheets(nextStudents, nextMatches);
       return nextStudents;
     });
-  }, [students, syncWithGoogleSheets, rpVariables]);
+  }, [students, syncWithGoogleSheets, rpVariables, tierThresholds]);
 
   // 경기 삭제(롤백) 및 동기화
   const deleteMatch = useCallback((matchId: string) => {
@@ -702,6 +741,7 @@ export function useLeagueStore() {
               recent: [],
               wins: 0,
               losses: 0,
+              demotionShields: 0,
             });
           }
         }
@@ -813,6 +853,43 @@ export function useLeagueStore() {
     syncWithGoogleSheets(restoredStudents, restoredMatches);
   }, [syncWithGoogleSheets]);
 
+  // 교사 통제형 휴면 강등 일괄 RP 차감 액션
+  const bulkDecayRP = useCallback((inactiveDays: number, decayAmount: number) => {
+    let affectedCount = 0;
+    let nextStudents: Student[] = [];
+
+    setStudents((prev) => {
+      const goldCutoff = tierThresholds.Gold ?? 1200;
+      const now = new Date().getTime();
+      const msThreshold = inactiveDays * 24 * 60 * 60 * 1000;
+
+      nextStudents = prev.map((s) => {
+        // Gold 등급 이상만 차감 대상
+        if (s.rp < goldCutoff) return s;
+        // 마지막 경기 전적이 존재하는 경우
+        if (s.lastMatchDate) {
+          const lastTime = new Date(s.lastMatchDate).getTime();
+          const elapsed = now - lastTime;
+          if (elapsed >= msThreshold) {
+            affectedCount++;
+            return {
+              ...s,
+              rp: Math.max(0, s.rp - decayAmount),
+            };
+          }
+        }
+        return s;
+      });
+
+      if (affectedCount > 0) {
+        syncWithGoogleSheets(nextStudents, matches);
+      }
+      return nextStudents;
+    });
+
+    return affectedCount;
+  }, [matches, tierThresholds, syncWithGoogleSheets]);
+
   return { 
     hydrated, 
     students, 
@@ -838,6 +915,7 @@ export function useLeagueStore() {
     updateLeagueSettings,
     updateStudentGender,
     deleteStudent,
-    restoreFromCSV
+    restoreFromCSV,
+    bulkDecayRP
   };
 }

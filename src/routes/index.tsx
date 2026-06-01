@@ -347,6 +347,7 @@ function Index() {
                 onUpdateSettings={updateLeagueSettings}
                 onDeleteStudent={deleteStudent}
                 onRestoreFromCSV={restoreFromCSV}
+                onBulkDecay={bulkDecayRP}
               />
             )}
           </>

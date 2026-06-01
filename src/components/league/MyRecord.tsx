@@ -134,6 +134,27 @@ export function MyRecord({
     };
   }, [me, thresholds]);
 
+  // 4.5. 마지막 경기 이후 경과 시간 및 휴면 경고 기준 계산
+  const inactivityInfo = useMemo(() => {
+    if (!me || !me.lastMatchDate) {
+      return { elapsedDays: null, warning: false, text: "아직 등록된 경기 전적이 없습니다. 첫 대결에 도전하세요!" };
+    }
+    const elapsedMs = new Date().getTime() - new Date(me.lastMatchDate).getTime();
+    const elapsedDays = Math.floor(elapsedMs / (1000 * 60 * 60 * 24));
+    
+    // 7일에 가까워지는(5일 이상) 시점부터 경고 활성화
+    const warning = elapsedDays >= 5;
+    
+    let text = "";
+    if (elapsedDays === 0) {
+      text = "오늘 매치에 참여했습니다! 리그 활성 상태가 유지되고 있습니다. 👍";
+    } else {
+      text = `마지막 경기 후 ${elapsedDays}일이 경과되었습니다.`;
+    }
+    
+    return { elapsedDays, warning, text };
+  }, [me]);
+
   if (!me || !tierProgress) {
     return (
       <div className="flex flex-col items-center justify-center p-12 text-center border border-dashed border-border rounded-2xl bg-card/25 backdrop-blur-md">
@@ -163,7 +184,7 @@ export function MyRecord({
           )} />
 
           <CardHeader className="pb-3 relative z-10">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <div className="space-y-0.5">
                 <span className="text-[10px] font-black uppercase tracking-wider text-neon-blue">Student Profile</span>
                 <CardTitle className="text-2xl font-black tracking-tight text-foreground flex items-center gap-2">
@@ -171,7 +192,22 @@ export function MyRecord({
                   <span>{me.name}</span>
                 </CardTitle>
               </div>
-              <TierBadge rp={me.rp} thresholds={thresholds} />
+              
+              <div className="flex items-center gap-2">
+                {/* 🛡️ 강등 보호막 카운터 HUD */}
+                {me.rp >= (thresholds?.Silver ?? 1000) && (
+                  <div className={cn(
+                    "flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold shadow-md transition-all shrink-0",
+                    (me.demotionShields ?? 0) > 0 
+                      ? "border-amber-500/40 bg-amber-500/10 text-amber-500 animate-pulse"
+                      : "border-border bg-card/60 text-muted-foreground"
+                  )}>
+                    <span>🛡️ x{me.demotionShields ?? 0}</span>
+                    <span className="text-[9px] font-black uppercase tracking-wider hidden sm:inline">강등 보호막</span>
+                  </div>
+                )}
+                <TierBadge rp={me.rp} thresholds={thresholds} />
+              </div>
             </div>
           </CardHeader>
 
@@ -180,6 +216,34 @@ export function MyRecord({
             <div className="flex items-baseline gap-2">
               <span className="text-4xl font-extrabold tracking-tight text-foreground">{me.rp}</span>
               <span className="text-xs font-black uppercase tracking-wider text-neon-blue">RP 점수</span>
+            </div>
+
+            {/* 휴면 경고 안내 바 */}
+            <div className={cn(
+              "rounded-xl border p-3 text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-sm transition-all",
+              inactivityInfo.elapsedDays === null 
+                ? "border-neon-blue/30 bg-neon-blue/5 text-neon-blue"
+                : inactivityInfo.warning
+                  ? "border-destructive/40 bg-destructive/10 text-destructive animate-pulse"
+                  : "border-border bg-background/30 text-muted-foreground"
+            )}>
+              <span className="flex items-center gap-1.5 leading-relaxed">
+                {inactivityInfo.warning ? "⚠️ " : "⏱️ "}
+                {inactivityInfo.text}
+              </span>
+              {me.rp >= (thresholds?.Gold ?? 1200) && inactivityInfo.warning ? (
+                <span className="text-[9px] font-black uppercase tracking-wider text-destructive bg-destructive/15 border border-destructive/20 px-2 py-0.5 rounded animate-bounce shrink-0 self-end sm:self-center">
+                  휴면 강등 위험! (대결 촉구)
+                </span>
+              ) : inactivityInfo.elapsedDays !== null ? (
+                <span className="text-[9px] font-black uppercase tracking-wider text-muted-foreground bg-card/65 px-2 py-0.5 rounded border border-border/40 shrink-0 self-end sm:self-center">
+                  휴면 강등 안전구역
+                </span>
+              ) : (
+                <span className="text-[9px] font-black uppercase tracking-wider text-neon-blue bg-neon-blue/10 px-2 py-0.5 rounded border border-neon-blue/20 shrink-0 self-end sm:self-center">
+                  신규 유저
+                </span>
+              )}
             </div>
 
             {/* Tier progress gauge */}

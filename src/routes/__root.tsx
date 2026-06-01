@@ -36,31 +36,70 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
 
+  const handleResetSession = () => {
+    try {
+      localStorage.removeItem("bdm.session.v1");
+      // Clear other potentially related session artifacts to guarantee a clean state
+      localStorage.removeItem("bdm.students.v2");
+      localStorage.removeItem("bdm.matches.v1");
+    } catch (e) {
+      console.error("Failed to clear localStorage:", e);
+    }
+    window.location.href = "/";
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          This page didn't load
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 relative overflow-hidden">
+      {/* Background neon grid */}
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(18,18,18,0.25)_1px,transparent_1px),linear-gradient(90deg,rgba(18,18,18,0.25)_1px,transparent_1px)] bg-[size:30px_30px] pointer-events-none opacity-30" />
+      <div className="absolute -top-40 -left-40 size-96 rounded-full bg-destructive/10 blur-[130px] pointer-events-none" />
+      <div className="absolute -bottom-40 -right-40 size-96 rounded-full bg-neon-blue/10 blur-[130px] pointer-events-none" />
+
+      <div className="max-w-md w-full text-center border border-border/60 bg-card/65 backdrop-blur-xl p-8 rounded-2xl shadow-[0_0_50px_rgba(239,68,68,0.06)] relative z-10 animate-in zoom-in-95 duration-300">
+        <div className="flex size-14 items-center justify-center rounded-xl bg-destructive/15 border border-destructive/30 text-destructive mx-auto mb-4 shadow-[0_0_20px_rgba(239,68,68,0.2)]">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-7">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+          </svg>
+        </div>
+
+        <h1 className="text-2xl font-black tracking-tight text-foreground">
+          페이지를 로드할 수 없습니다
         </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
+        <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
+          웹 어플리케이션 구동 중 예기치 못한 오류가 발생했습니다.<br />
+          이전에 시도했던 로그인 데이터(최고 관리자 등)가 남아 오류가 반복될 수 있습니다.
         </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
+
+        {/* Action buttons */}
+        <div className="mt-8 flex flex-col gap-2.5">
           <button
-            onClick={() => {
-              router.invalidate();
-              reset();
-            }}
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            onClick={handleResetSession}
+            className="w-full inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-neon-blue to-tier-diamond px-4 py-3 text-sm font-black text-primary-foreground shadow-lg hover:opacity-95 active:scale-[0.98] transition-all cursor-pointer"
           >
-            Try again
+            🔑 로그인 세션 초기화 및 안전 로그아웃
           </button>
-          <a
-            href="/"
-            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-          >
-            Go home
-          </a>
+          
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => {
+                router.invalidate();
+                reset();
+              }}
+              className="inline-flex items-center justify-center rounded-xl border border-border bg-card hover:bg-accent/40 px-4 py-2.5 text-xs font-bold text-foreground transition-colors cursor-pointer"
+            >
+              🔄 다시 시도하기
+            </button>
+            <a
+              href="/"
+              className="inline-flex items-center justify-center rounded-xl border border-border bg-card hover:bg-accent/40 px-4 py-2.5 text-xs font-bold text-foreground transition-colors"
+            >
+              🏠 메인 홈으로
+            </a>
+          </div>
+        </div>
+
+        <div className="mt-6 text-[10px] text-muted-foreground border-t border-border/25 pt-4">
+          세션 초기화 버튼을 누르면 브라우저에 임시 저장된 이전 로그인 캐시가 즉시 파기되고 정상적인 로그인 화면으로 되돌아갑니다.
         </div>
       </div>
     </div>

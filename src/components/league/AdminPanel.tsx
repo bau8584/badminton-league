@@ -87,6 +87,7 @@ export function AdminPanel({
   onUpdateSettings,
   onDeleteStudent,
   onRestoreFromCSV,
+  onBulkDecay,
 }: {
   students: Student[];
   matches: Match[];
@@ -103,6 +104,7 @@ export function AdminPanel({
   onUpdateSettings?: (thresholds: Record<TierName, number>, rpVars: { winDelta: number; loseDelta: number }) => void;
   onDeleteStudent?: (studentId: string) => void;
   onRestoreFromCSV?: (students: Student[], matches: Match[]) => void;
+  onBulkDecay?: (inactiveDays: number, decayAmount: number) => number;
 }) {
   // CSV 롤백 복원 상태
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
@@ -122,6 +124,47 @@ export function AdminPanel({
   // 학년/반 대형 필터 브라우저 상태
   const [filterGrade, setFilterGrade] = useState<number | null>(null);
   const [filterClassNum, setFilterClassNum] = useState<number | null>(null);
+
+  // 휴면 강등(RP Decay) 관리 상태
+  const [inactiveDays, setInactiveDays] = useState("7");
+  const [decayAmount, setDecayAmount] = useState("15");
+
+  const handleBulkDecay = () => {
+    const days = parseInt(inactiveDays, 10);
+    const amount = parseInt(decayAmount, 10);
+
+    if (isNaN(days) || days <= 0) {
+      return toast.error("기준 미활동 일수는 1일 이상이어야 합니다.");
+    }
+    if (isNaN(amount) || amount <= 0) {
+      return toast.error("차감할 RP는 1점 이상이어야 합니다.");
+    }
+
+    if (!onBulkDecay) return;
+
+    // 골드 커트라인 획득
+    const goldCutoff = thresholds?.Gold ?? 1200;
+    const now = new Date().getTime();
+    const msThreshold = days * 24 * 60 * 60 * 1000;
+
+    const dormantStudents = students.filter((s) => {
+      if (s.rp < goldCutoff) return false;
+      if (!s.lastMatchDate) return false;
+      const lastTime = new Date(s.lastMatchDate).getTime();
+      return (now - lastTime) >= msThreshold;
+    });
+
+    if (dormantStudents.length === 0) {
+      return toast.info(`최근 ${days}일 동안 경기가 없고 골드 등급 이상인 휴면 감점 대상 학생이 없습니다.`);
+    }
+
+    const confirmMsg = `골드 등급 이상이면서 최근 ${days}일 이상 경기를 치르지 않은 휴면 학생 ${dormantStudents.length}명에게서 각각 -${amount} RP를 일괄 감점 차감하시겠습니까?\n\n[차감 대상 학생]\n${dormantStudents.map((s) => `- ${s.grade}학년 ${s.classNum}반 ${s.name} (${s.rp} RP)`).join("\n")}`;
+
+    if (!confirm(confirmMsg)) return;
+
+    const decayCount = onBulkDecay(days, amount);
+    toast.success(`휴면 유저 일괄 감점이 반영되었습니다! 총 ${decayCount}명의 학생 RP가 정상적으로 차감 처리되었습니다.`);
+  };
 
   // 티어 및 RP 수동 설정 폼 상태
   const [inputBronze, setInputBronze] = useState(thresholds?.Bronze?.toString() ?? "0");
@@ -1103,6 +1146,63 @@ export function AdminPanel({
               <Save className="size-4.5 mr-2" /> 캘리브레이션 리그 설정 저장 및 반영
             </Button>
           </div>
+        </div>
+      </Card>
+
+      {/* 3.8. Inactivity RP Decay (Dormant User Control) */}
+      <Card className="border border-amber-500/30 bg-amber-500/5 p-6 backdrop-blur shadow-xl relative overflow-hidden">
+        <div className="absolute right-0 top-0 opacity-5 pointer-events-none">
+          <ShieldAlert className="size-48 text-amber-500" />
+        </div>
+        
+        <div className="mb-4">
+          <div className="flex items-center gap-2 text-amber-500">
+            <ShieldAlert className="size-5" />
+            <h3 className="font-black text-lg">휴면 유저 관리 (Dormant User Control)</h3>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            골드 등급 이상이면서 오랫동안 대결에 참여하지 않은 학생들의 RP를 일괄 감점하여 리그 활성도를 보존합니다.
+          </p>
+        </div>
+
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 bg-background/30 p-4 rounded-xl border border-border/30 mb-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-foreground">기준 미활동 일수</label>
+            <div className="relative">
+              <Input
+                type="number"
+                min={1}
+                value={inactiveDays}
+                onChange={(e) => setInactiveDays(e.target.value)}
+                className="h-10 border-border/60 bg-background/50 focus:border-amber-500 font-sans"
+              />
+              <span className="absolute right-3 top-2 text-xs text-muted-foreground font-bold">일 이상</span>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-foreground">차감할 RP</label>
+            <div className="relative">
+              <Input
+                type="number"
+                min={1}
+                value={decayAmount}
+                onChange={(e) => setDecayAmount(e.target.value)}
+                className="h-10 border-border/60 bg-background/50 focus:border-amber-500 font-sans text-destructive"
+              />
+              <span className="absolute right-3 top-2 text-xs text-destructive font-bold">RP 감점</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <Button
+            onClick={handleBulkDecay}
+            disabled={!onBulkDecay}
+            className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white font-black tracking-wide h-10 px-6 shadow-md shadow-amber-500/10 active:scale-95 transition-all"
+          >
+            <ShieldAlert className="size-4.5 mr-2" /> 휴면 유저 일괄 차감 실행
+          </Button>
         </div>
       </Card>
 
