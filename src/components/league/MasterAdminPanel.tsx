@@ -34,7 +34,7 @@ export function MasterAdminPanel({
     try {
       const response = await fetch(`${masterApiUrl}?action=GET_TEACHERS`);
       const data = await response.json();
-      if (data.status === "success" && data.teachers) {
+      if (data.status === "success" && Array.isArray(data.teachers)) {
         setTeachers(data.teachers);
       } else {
         toast.error("교사 목록을 가져오지 못했습니다.");
