@@ -51,7 +51,8 @@ function Index() {
     updateLeagueSettings,
     updateStudentGender,
     deleteStudent,
-    restoreFromCSV
+    restoreFromCSV,
+    bulkDecayRP
   } = useLeagueStore();
 
   const [tab, setTab] = useState<Tab>("leaderboard");
