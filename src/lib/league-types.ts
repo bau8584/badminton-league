@@ -20,6 +20,8 @@ export type Match = {
   scoreA: number;
   scoreB: number;
   date: string;
+  rpDeltaA?: number;
+  rpDeltaB?: number;
 };
 
 export type TierName = "Bronze" | "Silver" | "Gold" | "Platinum" | "Diamond";

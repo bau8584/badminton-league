@@ -319,8 +319,9 @@ export function MyRecord({
                 const myScore = m.playerAId === me.id ? m.scoreA : m.scoreB;
                 const oppScore = m.playerAId === me.id ? m.scoreB : m.scoreA;
 
-                // RP 변동폭 (+winDelta, -loseDelta)
-                const rpDelta = isWin ? rpVariables.winDelta : -rpVariables.loseDelta;
+                // RP 변동폭 (정밀 계산 변동폭 지원)
+                const matchDelta = m.playerAId === me.id ? m.rpDeltaA : m.rpDeltaB;
+                const rpDelta = matchDelta !== undefined ? matchDelta : (isWin ? rpVariables.winDelta : -rpVariables.loseDelta);
 
                 // 경기 날짜 포맷
                 const dateStr = new Date(m.date).toLocaleDateString("ko-KR", {

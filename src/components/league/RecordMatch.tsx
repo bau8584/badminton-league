@@ -28,6 +28,7 @@ type MatchResultData = {
     finalTier: string;
     promoted: boolean;
     score: number;
+    rpDelta: number;
   };
   loser: {
     name: string;
@@ -40,6 +41,7 @@ type MatchResultData = {
     finalRp: number;
     finalTier: string;
     score: number;
+    rpDelta: number;
   };
 };
 
@@ -142,15 +144,30 @@ export function RecordMatch({
     const winnerScore = aWon ? scoreA : scoreB;
     const loserScore = aWon ? scoreB : scoreA;
 
-    // 2. Pre-calculate values
+    // 2. Pre-calculate values with Underdog and Score Difference rewards
     const winPrevRp = winnerPlayer.rp;
     const winPrevTier = getTier(winPrevRp, thresholds);
-    const winFinalRp = winPrevRp + (rpVariables?.winDelta ?? 25);
-    const winFinalTier = getTier(winFinalRp, thresholds);
-
     const losePrevRp = loserPlayer.rp;
     const losePrevTier = getTier(losePrevRp, thresholds);
-    const loseFinalRp = Math.max(0, loserPlayer.rp - (rpVariables?.loseDelta ?? 20));
+
+    // Underdog bonus (capped at 15)
+    let underdogBonus = 0;
+    if (winPrevRp < losePrevRp) {
+      underdogBonus = Math.min(15, Math.floor((losePrevRp - winPrevRp) * 0.1));
+    }
+
+    // Score difference bonus (capped at 10)
+    const scoreDiff = Math.abs(scoreA - scoreB);
+    const scoreDiffBonus = Math.min(10, scoreDiff);
+
+    // Winner Delta Total
+    const winnerDelta = (rpVariables?.winDelta ?? 25) + underdogBonus + scoreDiffBonus;
+    const winFinalRp = winPrevRp + winnerDelta;
+    const winFinalTier = getTier(winFinalRp, thresholds);
+
+    // Loser protection: strictly base lose delta only
+    const loserDelta = rpVariables?.loseDelta ?? 20;
+    const loseFinalRp = Math.max(0, losePrevRp - loserDelta);
     const loseFinalTier = getTier(loseFinalRp, thresholds);
 
     // Promotion check: higher rank means index in TIER_ORDER is lower or same tier but higher subdivision (lower number)
@@ -174,6 +191,7 @@ export function RecordMatch({
         finalTier: winFinalTier,
         promoted,
         score: winnerScore,
+        rpDelta: winnerDelta,
       },
       loser: {
         name: loserPlayer.name,
@@ -186,6 +204,7 @@ export function RecordMatch({
         finalRp: loseFinalRp,
         finalTier: loseFinalTier,
         score: loserScore,
+        rpDelta: -loserDelta,
       }
     });
 
@@ -318,7 +337,7 @@ export function RecordMatch({
                     
                     <div className="flex flex-col items-center justify-center shrink-0">
                       <span className="text-muted-foreground text-sm font-semibold">➔</span>
-                      <span className="text-[9px] font-black text-win bg-win/15 px-1.5 py-0.5 rounded border border-win/30 font-mono mt-1">+25 RP</span>
+                      <span className="text-[9px] font-black text-win bg-win/15 px-1.5 py-0.5 rounded border border-win/30 font-mono mt-1">+{resultData.winner.rpDelta} RP</span>
                     </div>
 
                     <div className="flex flex-col items-center">
@@ -365,7 +384,7 @@ export function RecordMatch({
                     
                     <div className="flex flex-col items-center justify-center shrink-0">
                       <span className="text-muted-foreground text-sm font-semibold">➔</span>
-                      <span className="text-[9px] font-black text-loss bg-loss/15 px-1.5 py-0.5 rounded border border-loss/30 font-mono mt-1">-20 RP</span>
+                      <span className="text-[9px] font-black text-loss bg-loss/15 px-1.5 py-0.5 rounded border border-loss/30 font-mono mt-1">{resultData.loser.rpDelta} RP</span>
                     </div>
 
                     <div className="flex flex-col items-center">

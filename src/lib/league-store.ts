@@ -455,11 +455,47 @@ export function useLeagueStore() {
   useEffect(() => { if (hydrated) saveJSON(LOCKED_KEY, isLocked); }, [isLocked, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(SETTINGS_KEY, { thresholds: tierThresholds, rpVars: rpVariables }); }, [tierThresholds, rpVariables, hydrated]);
 
-  // 경기 기록 및 동기화
+  // 경기 기록 및 동기화 (언더독 보너스 및 점수차 비례 보상 적용)
   const recordMatch = useCallback((playerAId: string, playerBId: string, scoreA: number, scoreB: number) => {
     if (playerAId === playerBId) return;
     const aWon = scoreA > scoreB;
-    const match: Match = { id: uid(), playerAId, playerBId, scoreA, scoreB, date: new Date().toISOString() };
+
+    const playerA = students.find((s) => s.id === playerAId);
+    const playerB = students.find((s) => s.id === playerBId);
+    if (!playerA || !playerB) return;
+
+    const preRpA = playerA.rp;
+    const preRpB = playerB.rp;
+
+    // 1. 언더독 보너스 (최대 15점 캡)
+    let underdogBonus = 0;
+    if (aWon && preRpA < preRpB) {
+      underdogBonus = Math.min(15, Math.floor((preRpB - preRpA) * 0.1));
+    } else if (!aWon && preRpB < preRpA) {
+      underdogBonus = Math.min(15, Math.floor((preRpA - preRpB) * 0.1));
+    }
+
+    // 2. 점수차 비례 보상 (최대 10점 캡)
+    const scoreDiff = Math.abs(scoreA - scoreB);
+    const scoreDiffBonus = Math.min(10, scoreDiff);
+
+    // 3. 최종 변동 RP 계산
+    const winDeltaTotal = rpVariables.winDelta + underdogBonus + scoreDiffBonus;
+    const loseDeltaTotal = -rpVariables.loseDelta; // 패자 보호: 감점 방어
+
+    const deltaA = aWon ? winDeltaTotal : loseDeltaTotal;
+    const deltaB = aWon ? loseDeltaTotal : winDeltaTotal;
+
+    const match: Match = { 
+      id: uid(), 
+      playerAId, 
+      playerBId, 
+      scoreA, 
+      scoreB, 
+      date: new Date().toISOString(),
+      rpDeltaA: deltaA,
+      rpDeltaB: deltaB
+    };
     
     let nextMatches: Match[] = [];
     setMatches((prev) => {
@@ -472,7 +508,7 @@ export function useLeagueStore() {
         if (s.id !== playerAId && s.id !== playerBId) return s;
         const isA = s.id === playerAId;
         const won = isA ? aWon : !aWon;
-        const delta = won ? rpVariables.winDelta : -rpVariables.loseDelta;
+        const delta = isA ? deltaA : deltaB;
         return {
           ...s,
           rp: Math.max(0, s.rp + delta),
@@ -485,7 +521,7 @@ export function useLeagueStore() {
       syncWithGoogleSheets(nextStudents, nextMatches);
       return nextStudents;
     });
-  }, [syncWithGoogleSheets, rpVariables]);
+  }, [students, syncWithGoogleSheets, rpVariables]);
 
   // 경기 삭제(롤백) 및 동기화
   const deleteMatch = useCallback((matchId: string) => {
@@ -506,7 +542,12 @@ export function useLeagueStore() {
           const isA = s.id === playerAId;
           const won = isA ? aWon : !aWon;
           
-          const rpDelta = won ? -rpVariables.winDelta : rpVariables.loseDelta;
+          let rpDelta = 0;
+          if (isA) {
+            rpDelta = match.rpDeltaA !== undefined ? -match.rpDeltaA : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+          } else {
+            rpDelta = match.rpDeltaB !== undefined ? -match.rpDeltaB : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+          }
           const newRp = Math.max(0, s.rp + rpDelta);
           const newWins = Math.max(0, s.wins - (won ? 1 : 0));
           const newLosses = Math.max(0, s.losses - (won ? 0 : 1));
@@ -716,7 +757,12 @@ export function useLeagueStore() {
           nextStudents = nextStudents.map((s) => {
             if (s.id !== opponentId) return s;
             
-            const rpDelta = oppWon ? -rpVariables.winDelta : rpVariables.loseDelta;
+            let rpDelta = 0;
+            if (isOpponentA) {
+              rpDelta = m.rpDeltaA !== undefined ? -m.rpDeltaA : (oppWon ? -rpVariables.winDelta : rpVariables.loseDelta);
+            } else {
+              rpDelta = m.rpDeltaB !== undefined ? -m.rpDeltaB : (oppWon ? -rpVariables.winDelta : rpVariables.loseDelta);
+            }
             const newRp = Math.max(0, s.rp + rpDelta);
             const newWins = Math.max(0, s.wins - (oppWon ? 1 : 0));
             const newLosses = Math.max(0, s.losses - (oppWon ? 0 : 1));

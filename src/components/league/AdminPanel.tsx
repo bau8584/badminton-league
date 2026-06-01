@@ -777,7 +777,10 @@ export function AdminPanel({
                           {/* Bilateral rollback button */}
                           <Button
                             onClick={() => {
-                              if (window.confirm(`정말로 이 경기(VS ${opponent.name}) 기록을 완벽히 삭제하고, 두 학생의 RP 변동 수치를 경기 이전 상태로 양방향 롤백하시겠습니까?\n\n- 승자: RP -25, 1승 차감\n- 패자: RP +20, 1패 차감`)) {
+                              const deltaWinner = isPlayerA ? (m.rpDeltaA !== undefined ? Math.abs(m.rpDeltaA) : 25) : (m.rpDeltaB !== undefined ? Math.abs(m.rpDeltaB) : 25);
+                              const deltaLoser = !isPlayerA ? (m.rpDeltaA !== undefined ? Math.abs(m.rpDeltaA) : 20) : (m.rpDeltaB !== undefined ? Math.abs(m.rpDeltaB) : 20);
+                              
+                              if (window.confirm(`정말로 이 경기(VS ${opponent.name}) 기록을 완벽히 삭제하고, 두 학생의 RP 변동 수치를 경기 이전 상태로 양방향 롤백하시겠습니까?\n\n- 승자: RP -${deltaWinner}, 1승 차감\n- 패자: RP +${deltaLoser}, 1패 차감`)) {
                                 onDeleteMatch(m.id);
                                 toast.success("경기 기록이 완벽히 삭제되었으며 두 학생의 RP가 경기 이전으로 안전하게 복구되었습니다!");
                               }
