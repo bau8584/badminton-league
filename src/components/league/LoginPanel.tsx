@@ -60,7 +60,6 @@ export function LoginPanel({
 
   // Register Inputs
   const [regSchoolName, setRegSchoolName] = useState("");
-  const [regTeacherName, setRegTeacherName] = useState("");
   const [regAccessCode, setRegAccessCode] = useState("");
   const [regAccessCodeConfirm, setRegAccessCodeConfirm] = useState("");
   const [regScriptUrl, setRegScriptUrl] = useState("");
@@ -85,7 +84,6 @@ export function LoginPanel({
     // 2. TEACHER REGISTER FLOW
     if (isRegisterMode && activeTab === "TEACHER") {
       if (!regSchoolName.trim()) return toast.error("등록할 학교 이름을 입력해 주세요.");
-      if (!regTeacherName.trim()) return toast.error("교사 성함을 입력해 주세요.");
       if (!regAccessCode.trim()) return toast.error("접속 시 사용할 4~10자리 인증코드를 지정해 주세요.");
       if (regAccessCode !== regAccessCodeConfirm) return toast.error("지정한 두 인증코드가 일치하지 않습니다.");
 
@@ -95,7 +93,7 @@ export function LoginPanel({
         password: regAccessCode.trim(),
         role: "TEACHER",
         schoolName: regSchoolName.trim(),
-        userName: regTeacherName.trim(),
+        userName: "선생님",
         scriptUrl: regScriptUrl.trim() || undefined
       });
       toast.dismiss("reg-loading");
@@ -280,19 +278,7 @@ export function LoginPanel({
                 />
               </div>
 
-              {/* Register Teacher Name */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-bold text-foreground flex items-center gap-1">
-                  <Users className="size-3.5 text-neon-blue" /> 담당 교사 성함
-                </Label>
-                <Input
-                  required
-                  value={regTeacherName}
-                  onChange={(e) => setRegTeacherName(e.target.value)}
-                  placeholder="교사 실명 입력 (예: 박주현)"
-                  className="h-10 border-border/60 bg-background/40 focus:border-neon-blue transition-all"
-                />
-              </div>
+
 
               {/* Custom Access Code */}
               <div className="grid grid-cols-2 gap-3">
