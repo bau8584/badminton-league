@@ -13,6 +13,7 @@ export type Student = {
   losses: number;
   demotionShields?: number; // 횟수제 강등 보호막 (기본값 0)
   lastMatchDate?: string;   // 마지막으로 경기를 치른 날짜 (ISO 8601 형식)
+  lastWinDate?: string;     // 마지막으로 승리한 날짜 (YYYY-MM-DD 형식)
 };
 
 export type Match = {
@@ -24,6 +25,17 @@ export type Match = {
   date: string;
   rpDeltaA?: number;
   rpDeltaB?: number;
+  // 각 경기 시점 지급된 보너스 개별 감사 내역
+  underdogBonusA?: number;
+  underdogBonusB?: number;
+  scoreDiffBonusA?: number;
+  scoreDiffBonusB?: number;
+  rivalBonusA?: number;
+  rivalBonusB?: number;
+  firstWinBonusA?: number;
+  firstWinBonusB?: number;
+  revengeBonusA?: number;
+  revengeBonusB?: number;
 };
 
 export type TierName = "Bronze" | "Silver" | "Gold" | "Platinum" | "Diamond";

@@ -463,7 +463,7 @@ export function useLeagueStore() {
   useEffect(() => { if (hydrated) saveJSON(LOCKED_KEY, isLocked); }, [isLocked, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(SETTINGS_KEY, { thresholds: tierThresholds, rpVars: rpVariables }); }, [tierThresholds, rpVariables, hydrated]);
 
-  // 경기 기록 및 동기화 (언더독 보너스 및 점수차 비례 보상 적용)
+  // 경기 기록 및 동기화 (언더독 & 점수차 & 라이벌 & 첫승 & 복수전 누적 보상 적용)
   const recordMatch = useCallback((playerAId: string, playerBId: string, scoreA: number, scoreB: number) => {
     if (playerAId === playerBId) return;
     const aWon = scoreA > scoreB;
@@ -475,20 +475,47 @@ export function useLeagueStore() {
     const preRpA = playerA.rp;
     const preRpB = playerB.rp;
 
+    const winnerId = aWon ? playerAId : playerBId;
+    const loserId = aWon ? playerBId : playerAId;
+    const winnerPlayer = aWon ? playerA : playerB;
+    const loserPlayer = aWon ? playerB : playerA;
+
     // 1. 언더독 보너스 (최대 15점 캡)
     let underdogBonus = 0;
-    if (aWon && preRpA < preRpB) {
-      underdogBonus = Math.min(15, Math.floor((preRpB - preRpA) * 0.1));
-    } else if (!aWon && preRpB < preRpA) {
-      underdogBonus = Math.min(15, Math.floor((preRpA - preRpB) * 0.1));
+    const winPrevRp = winnerPlayer.rp;
+    const losePrevRp = loserPlayer.rp;
+    if (winPrevRp < losePrevRp) {
+      underdogBonus = Math.min(15, Math.floor((losePrevRp - winPrevRp) * 0.1));
     }
 
     // 2. 점수차 비례 보상 (최대 10점 캡)
     const scoreDiff = Math.abs(scoreA - scoreB);
     const scoreDiffBonus = Math.min(10, scoreDiff);
 
-    // 3. 최종 변동 RP 계산
-    const winDeltaTotal = rpVariables.winDelta + underdogBonus + scoreDiffBonus;
+    // 3. 라이벌 매치 보너스 (RP 차이 20점 이하 시 +5점)
+    const rpDiff = Math.abs(preRpA - preRpB);
+    const rivalBonus = rpDiff <= 20 ? 5 : 0;
+
+    // 4. 오늘의 첫 승 보너스 (+15점) - 현지 기준 일자 획득
+    const today = new Date();
+    const offset = today.getTimezoneOffset();
+    const localToday = new Date(today.getTime() - (offset * 60 * 1000));
+    const todayYmd = localToday.toISOString().split("T")[0];
+
+    const firstWinBonus = winnerPlayer.lastWinDate !== todayYmd ? 15 : 0;
+
+    // 5. 복수전 보너스 (과거에 현재 승자가 현재 패자에게 패한 경기 유무 판별)
+    const hasPastLoss = matches.some((m) => {
+      const isCurrentWinnerA = m.playerAId === winnerId && m.playerBId === loserId;
+      const isCurrentWinnerB = m.playerBId === winnerId && m.playerAId === loserId;
+      if (isCurrentWinnerA) return m.scoreB > m.scoreA; // winner lost to loser
+      if (isCurrentWinnerB) return m.scoreA > m.scoreB; // winner lost to loser
+      return false;
+    });
+    const revengeBonus = hasPastLoss ? 10 : 0;
+
+    // 6. 최종 변동 RP 계산 (누적 합산 방식)
+    const winDeltaTotal = rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus;
     const loseDeltaTotal = -rpVariables.loseDelta; // 패자 보호: 감점 방어
 
     const deltaA = aWon ? winDeltaTotal : loseDeltaTotal;
@@ -502,7 +529,18 @@ export function useLeagueStore() {
       scoreB, 
       date: new Date().toISOString(),
       rpDeltaA: deltaA,
-      rpDeltaB: deltaB
+      rpDeltaB: deltaB,
+      // Store individual bonus stats to audit & display in UI
+      underdogBonusA: aWon ? underdogBonus : 0,
+      underdogBonusB: !aWon ? underdogBonus : 0,
+      scoreDiffBonusA: aWon ? scoreDiffBonus : 0,
+      scoreDiffBonusB: !aWon ? scoreDiffBonus : 0,
+      rivalBonusA: aWon ? rivalBonus : 0,
+      rivalBonusB: !aWon ? rivalBonus : 0,
+      firstWinBonusA: aWon ? firstWinBonus : 0,
+      firstWinBonusB: !aWon ? firstWinBonus : 0,
+      revengeBonusA: aWon ? revengeBonus : 0,
+      revengeBonusB: !aWon ? revengeBonus : 0,
     };
     
     let nextMatches: Match[] = [];
@@ -554,13 +592,16 @@ export function useLeagueStore() {
           recent: [(won ? "W" : "L") as "W" | "L", ...s.recent].slice(0, 5),
           demotionShields: nextShields,
           lastMatchDate: new Date().toISOString(),
+          lastWinDate: won ? todayYmd : s.lastWinDate, // 승리 시 lastWinDate 갱신
         };
       });
 
       syncWithGoogleSheets(nextStudents, nextMatches);
       return nextStudents;
     });
-  }, [students, syncWithGoogleSheets, rpVariables, tierThresholds]);
+
+    return match;
+  }, [students, matches, syncWithGoogleSheets, rpVariables, tierThresholds]);
 
   // 경기 삭제(롤백) 및 동기화
   const deleteMatch = useCallback((matchId: string) => {

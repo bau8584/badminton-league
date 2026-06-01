@@ -5,7 +5,7 @@ import { TierBadge } from "./TierBadge";
 import { GenderMark } from "./GenderMark";
 import { cn } from "@/lib/utils";
 import { Trophy, X, Lock, Sparkles } from "lucide-react";
-import type { Student } from "@/lib/league-types";
+import type { Student, Match } from "@/lib/league-types";
 import { getTier, getTierSubdivision, TIER_ORDER } from "@/lib/league-types";
 import { toast } from "sonner";
 
@@ -29,6 +29,12 @@ type MatchResultData = {
     promoted: boolean;
     score: number;
     rpDelta: number;
+    // 신규 추가된 보상 세부 기록 내역
+    underdogBonus: number;
+    scoreDiffBonus: number;
+    rivalBonus: number;
+    firstWinBonus: number;
+    revengeBonus: number;
   };
   loser: {
     name: string;
@@ -56,7 +62,7 @@ export function RecordMatch({
   onUpdateGender,
 }: {
   students: Student[];
-  onRecord: (a: string, b: string, sa: number, sb: number) => void;
+  onRecord: (a: string, b: string, sa: number, sb: number) => Match;
   isLocked?: boolean;
   initials?: { playerAId: string; playerBId: string } | null;
   onClearInitials?: () => void;
@@ -144,40 +150,42 @@ export function RecordMatch({
     const winnerScore = aWon ? scoreA : scoreB;
     const loserScore = aWon ? scoreB : scoreA;
 
-    // 2. Pre-calculate values with Underdog and Score Difference rewards
     const winPrevRp = winnerPlayer.rp;
     const winPrevTier = getTier(winPrevRp, thresholds);
     const losePrevRp = loserPlayer.rp;
     const losePrevTier = getTier(losePrevRp, thresholds);
 
-    // Underdog bonus (capped at 15)
-    let underdogBonus = 0;
-    if (winPrevRp < losePrevRp) {
-      underdogBonus = Math.min(15, Math.floor((losePrevRp - winPrevRp) * 0.1));
-    }
+    // 2. Save to store and capture match object with calculated deltas
+    const matchObj = onRecord(playerA.id, playerB.id, scoreA, scoreB);
+    if (!matchObj) return;
 
-    // Score difference bonus (capped at 10)
-    const scoreDiff = Math.abs(scoreA - scoreB);
-    const scoreDiffBonus = Math.min(10, scoreDiff);
+    toast.success(`${winnerPlayer.name} 승리! 결과가 등록되었습니다.`);
 
-    // Winner Delta Total
-    const winnerDelta = (rpVariables?.winDelta ?? 25) + underdogBonus + scoreDiffBonus;
+    // 3. Extract exact custom deltas & bonuses calculated in league-store
+    const isWinnerA = matchObj.playerAId === winnerPlayer.id;
+    const winnerDelta = isWinnerA ? (matchObj.rpDeltaA ?? 0) : (matchObj.rpDeltaB ?? 0);
+    const loserDelta = isWinnerA ? (matchObj.rpDeltaB ?? 0) : (matchObj.rpDeltaA ?? 0);
+
+    const underdogBonus = isWinnerA ? (matchObj.underdogBonusA ?? 0) : (matchObj.underdogBonusB ?? 0);
+    const scoreDiffBonus = isWinnerA ? (matchObj.scoreDiffBonusA ?? 0) : (matchObj.scoreDiffBonusB ?? 0);
+    const rivalBonus = isWinnerA ? (matchObj.rivalBonusA ?? 0) : (matchObj.rivalBonusB ?? 0);
+    const firstWinBonus = isWinnerA ? (matchObj.firstWinBonusA ?? 0) : (matchObj.firstWinBonusB ?? 0);
+    const revengeBonus = isWinnerA ? (matchObj.revengeBonusA ?? 0) : (matchObj.revengeBonusB ?? 0);
+
     const winFinalRp = winPrevRp + winnerDelta;
     const winFinalTier = getTier(winFinalRp, thresholds);
 
-    // Loser protection: strictly base lose delta only
-    const loserDelta = rpVariables?.loseDelta ?? 20;
-    const loseFinalRp = Math.max(0, losePrevRp - loserDelta);
+    const loseFinalRp = Math.max(0, losePrevRp + loserDelta);
     const loseFinalTier = getTier(loseFinalRp, thresholds);
 
-    // Promotion check: higher rank means index in TIER_ORDER is lower or same tier but higher subdivision (lower number)
+    // Promotion check
     const winPrevSub = getTierSubdivision(winPrevRp, thresholds);
     const winFinalSub = getTierSubdivision(winFinalRp, thresholds);
     const basePromoted = TIER_ORDER.indexOf(winFinalTier) < TIER_ORDER.indexOf(winPrevTier);
     const subPromoted = winFinalTier === winPrevTier && winFinalSub < winPrevSub;
     const promoted = basePromoted || subPromoted;
 
-    // 3. Set match result details for the modal
+    // 4. Set match result details for the modal
     setResultData({
       winner: {
         name: winnerPlayer.name,
@@ -192,6 +200,12 @@ export function RecordMatch({
         promoted,
         score: winnerScore,
         rpDelta: winnerDelta,
+        // Stored bonuses
+        underdogBonus,
+        scoreDiffBonus,
+        rivalBonus,
+        firstWinBonus,
+        revengeBonus
       },
       loser: {
         name: loserPlayer.name,
@@ -204,13 +218,9 @@ export function RecordMatch({
         finalRp: loseFinalRp,
         finalTier: loseFinalTier,
         score: loserScore,
-        rpDelta: -loserDelta,
+        rpDelta: loserDelta,
       }
     });
-
-    // 4. Save to store
-    onRecord(playerA.id, playerB.id, scoreA, scoreB);
-    toast.success(`${winnerPlayer.name} 승리! 결과가 등록되었습니다.`);
 
     // 5. Open popup modal
     setShowModal(true);
@@ -347,6 +357,47 @@ export function RecordMatch({
                     </div>
                   </div>
                 </div>
+
+                {/* 🌟 획득 보너스 세부 뱃지 목록 */}
+                {(resultData.winner.underdogBonus > 0 ||
+                  resultData.winner.scoreDiffBonus > 0 ||
+                  resultData.winner.rivalBonus > 0 ||
+                  resultData.winner.firstWinBonus > 0 ||
+                  resultData.winner.revengeBonus > 0) && (
+                  <div className="mt-3.5 ml-2 pt-3 border-t border-win/10 flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-win/80 mr-1">보상 획득 요약:</span>
+                    
+                    {resultData.winner.firstWinBonus > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-500 font-extrabold text-[10px] px-2.5 py-1 shadow-[0_0_8px_rgba(245,158,11,0.1)]">
+                        🌟 오늘의 첫 승 (+15 RP)
+                      </span>
+                    )}
+
+                    {resultData.winner.revengeBonus > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded bg-purple-500/10 border border-purple-500/30 text-purple-400 font-extrabold text-[10px] px-2.5 py-1 shadow-[0_0_8px_rgba(168,85,247,0.1)]">
+                        😈 복수전 성공! (+10 RP)
+                      </span>
+                    )}
+
+                    {resultData.winner.underdogBonus > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded bg-blue-500/10 border border-blue-500/30 text-blue-400 font-extrabold text-[10px] px-2.5 py-1 shadow-[0_0_8px_rgba(59,130,246,0.15)]">
+                        🛡️ 언더독 격파 (+{resultData.winner.underdogBonus} RP)
+                      </span>
+                    )}
+
+                    {resultData.winner.scoreDiffBonus > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-extrabold text-[10px] px-2.5 py-1 shadow-[0_0_8px_rgba(16,185,129,0.15)]">
+                        🔥 압승 보너스 (+{resultData.winner.scoreDiffBonus} RP)
+                      </span>
+                    )}
+
+                    {resultData.winner.rivalBonus > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-extrabold text-[10px] px-2.5 py-1 shadow-[0_0_8px_rgba(6,182,212,0.15)]">
+                        ⚔️ 라이벌 격파! (+5 RP)
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Loser Stripe */}
