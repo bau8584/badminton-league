@@ -101,16 +101,16 @@ export function useLeagueStore() {
     }
   }, [session]);
 
-  // 2. 로그인 수행 함수 (마스터 DB와 대조 검증 및 1초 게스트 샌드박스 모드 탑재)
-  const loginUser = useCallback(async (loginId: string, password: string, role: "MASTER" | "TEACHER" | "STUDENT") => {
+  // 2. 로그인 수행 함수 (간편 로그인 시스템 도입 - 이메일/PW 제거)
+  const loginUser = useCallback(async (schoolName: string, accessCodeOrName: string, role: "MASTER" | "TEACHER" | "STUDENT") => {
     // A. 🎮 게스트(체험용) 모드 예외 처리 - 구글 통신 없이 즉시 로컬 실행 가동
-    if (loginId.toLowerCase() === "guest") {
+    if (schoolName.toLowerCase() === "guest") {
       const guestSession = {
         loginId: "guest",
-        role: "TEACHER" as const, // 교사 전용의 모든 기능(어드민 포함)을 100% 체험 가능
+        role: "TEACHER" as const,
         schoolName: "꿈나무 초등학교 (체험용 스포츠 리그)",
         userName: "게스트 교사",
-        scriptUrl: "" // 구글 동기화는 비워둠 (순수 로컬 캐시 구동)
+        scriptUrl: ""
       };
       setSession(guestSession);
       saveJSON(SESSION_KEY, guestSession);
@@ -125,87 +125,57 @@ export function useLeagueStore() {
 
     setIsSyncing(true);
     try {
-      const response = await fetch(MASTER_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain;charset=utf-8",
-        },
-        body: JSON.stringify({
-          action: "LOGIN",
-          loginId,
-          password,
-          role
-        })
-      });
-      const data = await response.json();
-      if (data.status === "success" && data.user) {
-        setSession(data.user);
-        saveJSON(SESSION_KEY, data.user);
-        
-        // 로그인 성공 시 해당 이용자의 전용 구글 시트에서 즉시 전적 데이터 끌어오기 (Hydration)
-        if (data.user.scriptUrl) {
-          try {
-            const remoteRes = await fetch(data.user.scriptUrl);
-            const remoteData = await remoteRes.json();
-            if (remoteData.status === "success") {
-              if (remoteData.students) {
-                setStudents(remoteData.students);
-                saveJSON(STUDENTS_KEY, remoteData.students);
-              }
-              if (remoteData.matches) {
-                setMatches(remoteData.matches);
-                saveJSON(MATCHES_KEY, remoteData.matches);
-              }
-            }
-          } catch (err) {
-            console.warn("Could not download remote sheet data upon login. Using cached/seed data:", err);
+      if (role === "TEACHER") {
+        if (accessCodeOrName === "1234") {
+          const teacherSession = {
+            loginId: "teacher_" + schoolName,
+            role: "TEACHER" as const,
+            schoolName: schoolName,
+            userName: "선생님",
+            scriptUrl: ""
+          };
+          setSession(teacherSession);
+          saveJSON(SESSION_KEY, teacherSession);
+          
+          const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
+          if (!localStudents || localStudents.length === 0) {
+            setStudents(SEED_STUDENTS);
+            saveJSON(STUDENTS_KEY, SEED_STUDENTS);
           }
+          return { success: true };
+        } else {
+          return { success: false, message: "교사 인증코드가 일치하지 않습니다. (기본 코드: 1234)" };
         }
-        return { success: true };
-      } else {
-        return { success: false, message: data.message || "로그인 정보가 맞지 않습니다." };
+      } else if (role === "STUDENT") {
+        const activeStudents = students.length > 0 ? students : loadJSON<Student[]>(STUDENTS_KEY, SEED_STUDENTS);
+        const exists = activeStudents.some((s) => s.name === accessCodeOrName);
+        if (exists) {
+          const studentSession = {
+            loginId: "student_" + accessCodeOrName,
+            role: "STUDENT" as const,
+            schoolName: schoolName,
+            userName: accessCodeOrName,
+            scriptUrl: ""
+          };
+          setSession(studentSession);
+          saveJSON(SESSION_KEY, studentSession);
+          return { success: true };
+        } else {
+          return { success: false, message: `${schoolName} 명단에 '${accessCodeOrName}' 학생이 존재하지 않습니다. 교사에게 문의하세요.` };
+        }
       }
+      return { success: false, message: "올바르지 않은 권한 요청입니다." };
     } catch (error) {
       console.error("Login request failed:", error);
-      return { success: false, message: "마스터 서버에 접속할 수 없습니다. 인터넷 상태를 확인해 주세요." };
+      return { success: false, message: "인증 처리 중 서버/로컬 통신 오류가 발생했습니다." };
     } finally {
       setIsSyncing(false);
     }
-  }, []);
+  }, [students]);
 
-  // 3. 신규 회원가입(교사/학생 등록) 수행 함수
-  const registerUser = useCallback(async (details: {
-    loginId: string;
-    password: string;
-    role: "TEACHER" | "STUDENT";
-    schoolName: string;
-    userName: string;
-    scriptUrl?: string;
-  }) => {
-    setIsSyncing(true);
-    try {
-      const response = await fetch(MASTER_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain;charset=utf-8",
-        },
-        body: JSON.stringify({
-          action: "REGISTER",
-          ...details
-        })
-      });
-      const data = await response.json();
-      if (data.status === "success") {
-        return { success: true, message: data.message };
-      } else {
-        return { success: false, message: data.message || "가입 처리에 실패했습니다." };
-      }
-    } catch (error) {
-      console.error("Registration request failed:", error);
-      return { success: false, message: "마스터 가입 서버에 접속할 수 없습니다." };
-    } finally {
-      setIsSyncing(false);
-    }
+  // 3. 신규 회원가입 수행 함수 (회원가입 미사용에 따른 스텁 처리)
+  const registerUser = useCallback(async (details: any) => {
+    return { success: true, message: "회원가입이 완료되었습니다." };
   }, []);
 
   // 4. 로그아웃 수행 함수

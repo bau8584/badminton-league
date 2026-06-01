@@ -7,6 +7,7 @@ import { AdminPanel } from "@/components/league/AdminPanel";
 import { MatchRecommend } from "@/components/league/MatchRecommend";
 import { LoginPanel } from "@/components/league/LoginPanel";
 import { MasterAdminPanel } from "@/components/league/MasterAdminPanel";
+import { MyRecord } from "@/components/league/MyRecord";
 import { Toaster } from "@/components/ui/sonner";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -22,7 +23,7 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-type Tab = "leaderboard" | "recommend" | "record" | "admin" | "masterAdmin";
+type Tab = "leaderboard" | "recommend" | "record" | "admin" | "masterAdmin" | "myRecord";
 
 function Index() {
   const {
@@ -75,6 +76,15 @@ function Index() {
       }
     }
   }, [session]);
+
+  // 학생 탭 접근 통제 보안 가드 (오직 recommend 와 myRecord 탭만 허용)
+  useEffect(() => {
+    if (session && session.role === "STUDENT") {
+      if (tab !== "recommend" && tab !== "myRecord") {
+        setTab("recommend");
+      }
+    }
+  }, [session, tab]);
 
   const handleSelectRecommendedMatch = (playerAId: string, playerBId: string) => {
     setRecommendInitials({ playerAId, playerBId });
@@ -211,28 +221,40 @@ function Index() {
             {/* Standard Tenant Tabs (Rearranged) */}
             {session.role !== "MASTER" && (
               <>
-                {/* 1. 경기 기록 입력 (교사 전용) */}
-                {session.role !== "STUDENT" && (
-                  <TabButton active={tab === "record"} onClick={() => setTab("record")} icon={<Swords className="size-4" />}>
-                    경기 기록 입력
-                  </TabButton>
-                )}
+                {session.role === "STUDENT" ? (
+                  <>
+                    {/* 1. 매치 추천 (학생) */}
+                    <TabButton active={tab === "recommend"} onClick={() => setTab("recommend")} icon={<Target className="size-4" />}>
+                      매치 추천
+                    </TabButton>
 
-                {/* 2. 매치 추천 (모든 역할 - 이모티콘 삭제) */}
-                <TabButton active={tab === "recommend"} onClick={() => setTab("recommend")} icon={<Target className="size-4" />}>
-                  매치 추천
-                </TabButton>
+                    {/* 2. 나의 기록 (학생 - 신규) */}
+                    <TabButton active={tab === "myRecord"} onClick={() => setTab("myRecord")} icon={<Trophy className="size-4" />}>
+                      나의 기록
+                    </TabButton>
+                  </>
+                ) : (
+                  <>
+                    {/* 1. 경기 기록 입력 (교사 전용) */}
+                    <TabButton active={tab === "record"} onClick={() => setTab("record")} icon={<Swords className="size-4" />}>
+                      경기 기록 입력
+                    </TabButton>
 
-                {/* 3. 티어 순위표 (모든 역할) */}
-                <TabButton active={tab === "leaderboard"} onClick={() => setTab("leaderboard")} icon={<Trophy className="size-4" />}>
-                  티어 순위표
-                </TabButton>
-                
-                {/* 4. 교사 관리자 (교사 전용) */}
-                {session.role !== "STUDENT" && (
-                  <TabButton active={tab === "admin"} onClick={() => setTab("admin")} icon={<Users className="size-4" />}>
-                    교사 관리자
-                  </TabButton>
+                    {/* 2. 매치 추천 (교사) */}
+                    <TabButton active={tab === "recommend"} onClick={() => setTab("recommend")} icon={<Target className="size-4" />}>
+                      매치 추천
+                    </TabButton>
+
+                    {/* 3. 티어 순위표 (교사) */}
+                    <TabButton active={tab === "leaderboard"} onClick={() => setTab("leaderboard")} icon={<Trophy className="size-4" />}>
+                      티어 순위표
+                    </TabButton>
+                    
+                    {/* 4. 교사 관리자 (교사 전용) */}
+                    <TabButton active={tab === "admin"} onClick={() => setTab("admin")} icon={<Users className="size-4" />}>
+                      교사 관리자
+                    </TabButton>
+                  </>
                 )}
               </>
             )}
@@ -250,7 +272,7 @@ function Index() {
         {/* Tenant Panels */}
         {session.role !== "MASTER" && (
           <>
-            {tab === "leaderboard" && <Leaderboard students={students} thresholds={tierThresholds} />}
+            {tab === "leaderboard" && session.role !== "STUDENT" && <Leaderboard students={students} thresholds={tierThresholds} />}
             
             {tab === "recommend" && (
               <MatchRecommend
@@ -267,6 +289,16 @@ function Index() {
                 onTargetClassChange={setRecommendTargetClass}
                 thresholds={tierThresholds}
                 onUpdateGender={updateStudentGender}
+              />
+            )}
+            
+            {session.role === "STUDENT" && tab === "myRecord" && (
+              <MyRecord
+                session={session}
+                students={students}
+                matches={matches}
+                thresholds={tierThresholds}
+                rpVariables={rpVariables}
               />
             )}
             
