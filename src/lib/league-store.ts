@@ -103,8 +103,11 @@ export function useLeagueStore() {
 
   // 2. 로그인 수행 함수 (간편 로그인 시스템 도입 - 이메일/PW 제거)
   const loginUser = useCallback(async (schoolName: string, accessCodeOrName: string, role: "MASTER" | "TEACHER" | "STUDENT") => {
+    const cleanedSchool = schoolName.trim();
+    const cleanedCode = accessCodeOrName.trim();
+
     // A. 🎮 게스트(체험용) 모드 예외 처리 - 구글 통신 없이 즉시 로컬 실행 가동
-    if (schoolName.toLowerCase() === "guest") {
+    if (cleanedSchool.toLowerCase() === "guest") {
       const guestSession = {
         loginId: "guest",
         role: "TEACHER" as const,
@@ -125,12 +128,130 @@ export function useLeagueStore() {
 
     setIsSyncing(true);
     try {
-      if (role === "TEACHER") {
-        if (accessCodeOrName === "1234") {
+      // 1. 청림초등학교 교사 바로 로그인 매핑 지름길 (최우선 처리)
+      if (role === "TEACHER" && (cleanedSchool === "청림초" || cleanedSchool === "청림초등학교") && cleanedCode === "1234") {
+        const targetSession = {
+          loginId: "bau8584",
+          role: "TEACHER" as const,
+          schoolName: "청림초등학교",
+          userName: "박주현",
+          scriptUrl: "https://script.google.com/macros/s/AKfycbxXC4J6zKWq_vEEbh_CnARl9V6SD9Dtt_nk1oMcmIZHTJVU5XdqV8xYM5d5YkOu6COEYA/exec"
+        };
+        setSession(targetSession);
+        saveJSON(SESSION_KEY, targetSession);
+
+        // 구글 시트에서 즉시 전적 데이터 끌어오기 (Hydration)
+        try {
+          const remoteRes = await fetch(targetSession.scriptUrl);
+          const remoteData = await remoteRes.json();
+          if (remoteData.status === "success") {
+            if (remoteData.students) {
+              setStudents(remoteData.students);
+              saveJSON(STUDENTS_KEY, remoteData.students);
+            }
+            if (remoteData.matches) {
+              setMatches(remoteData.matches);
+              saveJSON(MATCHES_KEY, remoteData.matches);
+            }
+          }
+        } catch (err) {
+          console.warn("Could not download remote sheet data for Cheonglim. Using cache:", err);
+          const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
+          if (!localStudents || localStudents.length === 0) {
+            setStudents(SEED_STUDENTS);
+            saveJSON(STUDENTS_KEY, SEED_STUDENTS);
+          }
+        }
+        return { success: true };
+      }
+
+      // 2. 청림초등학교 학생 바로 로그인 매핑 지름길 (원격 명렬 자동 하이드레이션)
+      if (role === "STUDENT" && (cleanedSchool === "청림초" || cleanedSchool === "청림초등학교")) {
+        let activeStudents = students;
+        const 청림초_scriptUrl = "https://script.google.com/macros/s/AKfycbxXC4J6zKWq_vEEbh_CnARl9V6SD9Dtt_nk1oMcmIZHTJVU5XdqV8xYM5d5YkOu6COEYA/exec";
+        
+        try {
+          const res = await fetch(청림초_scriptUrl);
+          const remoteData = await res.json();
+          if (remoteData.status === "success" && remoteData.students) {
+            activeStudents = remoteData.students;
+            setStudents(remoteData.students);
+            saveJSON(STUDENTS_KEY, remoteData.students);
+            if (remoteData.matches) {
+              setMatches(remoteData.matches);
+              saveJSON(MATCHES_KEY, remoteData.matches);
+            }
+          }
+        } catch (err) {
+          console.warn("Offline or failed fetching student roster from scriptUrl:", err);
+        }
+
+        if (activeStudents.length === 0) {
+          activeStudents = loadJSON<Student[]>(STUDENTS_KEY, SEED_STUDENTS);
+        }
+
+        const exists = activeStudents.some((s) => s.name === cleanedCode);
+        if (exists) {
+          const studentSession = {
+            loginId: "student_" + cleanedCode,
+            role: "STUDENT" as const,
+            schoolName: "청림초등학교",
+            userName: cleanedCode,
+            scriptUrl: 청림초_scriptUrl
+          };
+          setSession(studentSession);
+          saveJSON(SESSION_KEY, studentSession);
+          return { success: true };
+        } else {
+          return { success: false, message: `청림초등학교 명단에 '${cleanedCode}' 학생이 존재하지 않습니다. 교사에게 문의하세요.` };
+        }
+      }
+
+      // 3. MASTER 최고 관리자 또는 기타 등록 계정 로그인 시도 (마스터 API 통신)
+      const response = await fetch(MASTER_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "LOGIN",
+          loginId: role === "MASTER" ? cleanedSchool : (role === "TEACHER" ? cleanedSchool : `student_${cleanedCode}`),
+          password: cleanedCode,
+          role
+        })
+      });
+      const data = await response.json();
+      
+      if (data.status === "success" && data.user) {
+        setSession(data.user);
+        saveJSON(SESSION_KEY, data.user);
+        
+        if (data.user.scriptUrl) {
+          try {
+            const remoteRes = await fetch(data.user.scriptUrl);
+            const remoteData = await remoteRes.json();
+            if (remoteData.status === "success") {
+              if (remoteData.students) {
+                setStudents(remoteData.students);
+                saveJSON(STUDENTS_KEY, remoteData.students);
+              }
+              if (remoteData.matches) {
+                setMatches(remoteData.matches);
+                saveJSON(MATCHES_KEY, remoteData.matches);
+              }
+            }
+          } catch (err) {
+            console.warn("Could not download remote sheet data upon login. Using cached data:", err);
+          }
+        }
+        return { success: true };
+      } else {
+        // Fallback for other default teacher (1234) locally
+        if (role === "TEACHER" && cleanedCode === "1234") {
           const teacherSession = {
-            loginId: "teacher_" + schoolName,
+            loginId: "teacher_" + cleanedSchool,
             role: "TEACHER" as const,
-            schoolName: schoolName,
+            schoolName: cleanedSchool,
             userName: "선생님",
             scriptUrl: ""
           };
@@ -143,39 +264,98 @@ export function useLeagueStore() {
             saveJSON(STUDENTS_KEY, SEED_STUDENTS);
           }
           return { success: true };
+        } else if (role === "STUDENT") {
+          // Fallback student local check
+          const activeStudents = students.length > 0 ? students : loadJSON<Student[]>(STUDENTS_KEY, SEED_STUDENTS);
+          const exists = activeStudents.some((s) => s.name === cleanedCode);
+          if (exists) {
+            const studentSession = {
+              loginId: "student_" + cleanedCode,
+              role: "STUDENT" as const,
+              schoolName: cleanedSchool,
+              userName: cleanedCode,
+              scriptUrl: ""
+            };
+            setSession(studentSession);
+            saveJSON(SESSION_KEY, studentSession);
+            return { success: true };
+          }
+        }
+        return { success: false, message: data.message || "로그인 인증 정보가 올바르지 않습니다." };
+      }
+    } catch (error) {
+      console.warn("Master API login offline. Falling back to local validation:", error);
+      // Offline fallback
+      if (role === "TEACHER") {
+        if (cleanedCode === "1234") {
+          const teacherSession = {
+            loginId: "teacher_" + cleanedSchool,
+            role: "TEACHER" as const,
+            schoolName: cleanedSchool,
+            userName: "선생님",
+            scriptUrl: ""
+          };
+          setSession(teacherSession);
+          saveJSON(SESSION_KEY, teacherSession);
+          return { success: true };
         } else {
-          return { success: false, message: "교사 인증코드가 일치하지 않습니다. (기본 코드: 1234)" };
+          return { success: false, message: "교사 인증코드가 오프라인 상태에서 일치하지 않습니다. (기본 코드: 1234)" };
         }
       } else if (role === "STUDENT") {
         const activeStudents = students.length > 0 ? students : loadJSON<Student[]>(STUDENTS_KEY, SEED_STUDENTS);
-        const exists = activeStudents.some((s) => s.name === accessCodeOrName);
+        const exists = activeStudents.some((s) => s.name === cleanedCode);
         if (exists) {
           const studentSession = {
-            loginId: "student_" + accessCodeOrName,
+            loginId: "student_" + cleanedCode,
             role: "STUDENT" as const,
-            schoolName: schoolName,
-            userName: accessCodeOrName,
+            schoolName: cleanedSchool,
+            userName: cleanedCode,
             scriptUrl: ""
           };
           setSession(studentSession);
           saveJSON(SESSION_KEY, studentSession);
           return { success: true };
-        } else {
-          return { success: false, message: `${schoolName} 명단에 '${accessCodeOrName}' 학생이 존재하지 않습니다. 교사에게 문의하세요.` };
         }
       }
-      return { success: false, message: "올바르지 않은 권한 요청입니다." };
-    } catch (error) {
-      console.error("Login request failed:", error);
-      return { success: false, message: "인증 처리 중 서버/로컬 통신 오류가 발생했습니다." };
+      return { success: false, message: "마스터 서버 통신 및 로컬 검증에 모두 실패했습니다." };
     } finally {
       setIsSyncing(false);
     }
   }, [students]);
 
-  // 3. 신규 회원가입 수행 함수 (회원가입 미사용에 따른 스텁 처리)
-  const registerUser = useCallback(async (details: any) => {
-    return { success: true, message: "회원가입이 완료되었습니다." };
+  // 3. 신규 회원가입 수행 함수 (마스터 DB 등록 복원)
+  const registerUser = useCallback(async (details: {
+    loginId: string;
+    password: string;
+    role: "TEACHER" | "STUDENT";
+    schoolName: string;
+    userName: string;
+    scriptUrl?: string;
+  }) => {
+    setIsSyncing(true);
+    try {
+      const response = await fetch(MASTER_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "REGISTER",
+          ...details
+        })
+      });
+      const data = await response.json();
+      if (data.status === "success") {
+        return { success: true, message: data.message };
+      } else {
+        return { success: false, message: data.message || "가입 처리에 실패했습니다." };
+      }
+    } catch (error) {
+      console.error("Registration request failed:", error);
+      return { success: false, message: "마스터 가입 서버에 접속할 수 없습니다." };
+    } finally {
+      setIsSyncing(false);
+    }
   }, []);
 
   // 4. 로그아웃 수행 함수
