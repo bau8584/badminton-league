@@ -86,6 +86,20 @@ function Index() {
     }
   }, [session, tab]);
 
+  // 학생 로그인 시 AI 매치메이킹 타겟(recommendSel)을 본인 정보로 즉시 고정
+  useEffect(() => {
+    if (session && session.role === "STUDENT" && session.studentId) {
+      const student = students.find((s) => s.id === session.studentId);
+      if (student) {
+        setRecommendSel({
+          grade: student.grade,
+          classNum: student.classNum,
+          studentId: student.id
+        });
+      }
+    }
+  }, [session, students]);
+
   const handleSelectRecommendedMatch = (playerAId: string, playerBId: string) => {
     setRecommendInitials({ playerAId, playerBId });
     setTab("record");
@@ -289,6 +303,7 @@ function Index() {
                 onTargetClassChange={setRecommendTargetClass}
                 thresholds={tierThresholds}
                 onUpdateGender={updateStudentGender}
+                isStudentView={session?.role === "STUDENT"}
               />
             )}
             

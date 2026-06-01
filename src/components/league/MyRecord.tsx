@@ -33,6 +33,7 @@ interface MyRecordProps {
     schoolName: string;
     userName: string;
     scriptUrl: string;
+    studentId?: string;
   } | null;
   students: Student[];
   matches: Match[];
@@ -48,10 +49,13 @@ export function MyRecord({
   rpVariables = { winDelta: 25, loseDelta: 20 }
 }: MyRecordProps) {
   
-  // 1. 현재 접속한 학생 정보 매칭
+  // 1. 현재 접속한 학생 정보 매칭 (동명이인 처리 포함)
   const me = useMemo(() => {
     if (!session || session.role !== "STUDENT") return null;
-    return students.find((s) => s.name === session.userName);
+    if (session.studentId) {
+      return students.find((s) => s.id === session.studentId) ?? null;
+    }
+    return students.find((s) => s.name === session.userName) ?? null;
   }, [session, students]);
 
   // 2. 본인이 참여한 최근 경기 목록 (최신순)

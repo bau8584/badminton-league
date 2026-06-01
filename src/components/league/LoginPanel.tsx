@@ -26,7 +26,13 @@ export function LoginPanel({
   onRegister,
   isSyncing
 }: {
-  onLogin: (schoolName: string, accessCodeOrName: string, role: Role) => Promise<{ success: boolean; message?: string }>;
+  onLogin: (
+    schoolName: string, 
+    accessCodeOrName: string, 
+    role: Role, 
+    studentGrade?: number, 
+    studentClass?: number
+  ) => Promise<{ success: boolean; message?: string }>;
   onRegister: (details: {
     loginId: string;
     password: string;
@@ -45,6 +51,8 @@ export function LoginPanel({
   const [schoolName, setSchoolName] = useState("");
   const [accessCode, setAccessCode] = useState("");
   const [studentName, setStudentName] = useState("");
+  const [studentGrade, setStudentGrade] = useState("");
+  const [studentClass, setStudentClass] = useState("");
 
   // Master Login Inputs
   const [masterId, setMasterId] = useState("");
@@ -119,14 +127,26 @@ export function LoginPanel({
         toast.error(res.message || "인증코드가 일치하지 않습니다. (기본코드: 1234)");
       }
     } else {
+      if (!studentGrade) {
+        return toast.error("학년을 입력해 주세요.");
+      }
+      if (!studentClass) {
+        return toast.error("반을 입력해 주세요.");
+      }
       if (!studentName.trim()) {
         return toast.error("학생 본인의 이름을 입력해 주세요.");
       }
-      const res = await onLogin(schoolName.trim(), studentName.trim(), "STUDENT");
+      const res = await onLogin(
+        schoolName.trim(), 
+        studentName.trim(), 
+        "STUDENT", 
+        parseInt(studentGrade), 
+        parseInt(studentClass)
+      );
       if (res.success) {
-        toast.success(`${schoolName} ${studentName} 학생 권한으로 접속했습니다!`);
+        toast.success(`${schoolName} ${studentGrade}학년 ${studentClass}반 ${studentName} 학생 권한으로 접속했습니다!`);
       } else {
-        toast.error(res.message || "해당 학교 명단에 등록되지 않은 학생입니다. 교사에게 문의하세요.");
+        toast.error(res.message || "해당 학교 명단에 등록되지 않은 학생입니다. 학년, 반, 이름을 다시 확인하세요.");
       }
     }
   };
@@ -381,15 +401,46 @@ export function LoginPanel({
                 </div>
               ) : (
                 /* STUDENT LOGIN FIELDS */
-                <div className="space-y-1.5 animate-in fade-in duration-200">
-                  <Label className="text-xs font-bold text-foreground">본인 이름</Label>
-                  <Input
-                    required
-                    value={studentName}
-                    onChange={(e) => setStudentName(e.target.value)}
-                    placeholder="명렬표에 등록된 본인 실명을 입력하세요"
-                    className="h-10 border-border/60 bg-background/40 hover:border-neon-blue/60 focus:border-neon-blue focus:ring-1 focus:ring-neon-blue transition-all"
-                  />
+                <div className="space-y-3.5 animate-in fade-in duration-200">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-foreground">학년</Label>
+                      <Input
+                        required
+                        type="number"
+                        min={1}
+                        max={6}
+                        value={studentGrade}
+                        onChange={(e) => setStudentGrade(e.target.value)}
+                        placeholder="학년 (1~6)"
+                        className="h-10 border-border/60 bg-background/40 focus:border-neon-blue transition-all font-sans"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-foreground">반</Label>
+                      <Input
+                        required
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={studentClass}
+                        onChange={(e) => setStudentClass(e.target.value)}
+                        placeholder="반 (1~20)"
+                        className="h-10 border-border/60 bg-background/40 focus:border-neon-blue transition-all font-sans"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-bold text-foreground">본인 이름</Label>
+                    <Input
+                      required
+                      value={studentName}
+                      onChange={(e) => setStudentName(e.target.value)}
+                      placeholder="명렬표에 등록된 본인 실명을 입력하세요"
+                      className="h-10 border-border/60 bg-background/40 hover:border-neon-blue/60 focus:border-neon-blue focus:ring-1 focus:ring-neon-blue transition-all"
+                    />
+                  </div>
                 </div>
               )}
             </div>

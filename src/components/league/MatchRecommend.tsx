@@ -28,6 +28,7 @@ export function MatchRecommend({
   onTargetClassChange,
   thresholds,
   onUpdateGender,
+  isStudentView = false,
 }: {
   students: Student[];
   matches: Match[];
@@ -42,6 +43,7 @@ export function MatchRecommend({
   onTargetClassChange: (c: number | null) => void;
   thresholds?: Record<string, number>;
   onUpdateGender?: (studentId: string, gender: "M" | "F" | "U") => void;
+  isStudentView?: boolean;
 }) {
   const player = students.find((s) => s.id === sel.studentId) ?? null;
 
@@ -281,9 +283,9 @@ export function MatchRecommend({
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2 text-neon-blue">
             <Target className="size-5" />
-            <h3 className="font-black text-lg">AI 매치메이킹 - 나의 정보</h3>
+            <h3 className="font-black text-lg">AI 매치메이킹 - {isStudentView ? "나의 정보" : "주요 분석 선수"}</h3>
           </div>
-          {player && (
+          {player && !isStudentView && (
             <button
               onClick={() => onSelChange({ grade: sel.grade, classNum: sel.classNum, studentId: null })}
               className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-all"
@@ -314,9 +316,14 @@ export function MatchRecommend({
               <span className="font-bold text-foreground">💡 매치 추천 기준:</span> 실력 차이(±150 RP), 신체 발달(동학년 우선), 상향 도전 기회 부여(+50 RP 가산점), 그리고 최근 3경기 이내의 상대는 완벽하게 필터링하여 제외됩니다.
             </div>
           </div>
+        ) : isStudentView ? (
+          <div className="flex flex-col items-center justify-center p-8 text-center bg-background/30 rounded-xl border border-dashed border-border/80">
+            <div className="size-8 rounded-full border-2 border-neon-blue border-t-transparent animate-spin mb-3" />
+            <p className="text-xs text-muted-foreground font-bold font-sans">학생 매치 정보를 조회하는 중입니다...</p>
+          </div>
         ) : (
           <div className="space-y-4">
-            <div className="text-xs text-muted-foreground font-bold uppercase tracking-wider mb-2">나의 이름을 선택해 주세요</div>
+            <div className="text-xs text-muted-foreground font-bold uppercase tracking-wider mb-2">선수 이름을 선택해 주세요</div>
             
             <div className="space-y-4">
               {/* Step 1: Grade Selection */}
@@ -693,12 +700,18 @@ export function MatchRecommend({
                       </div>
 
                       {/* Challenge Action Button */}
-                      <Button
-                        onClick={() => onSelectRecommendedMatch(player.id, s.id)}
-                        className="mt-5 w-full bg-gradient-to-r from-neon-blue/80 to-tier-diamond hover:from-neon-blue hover:to-tier-diamond text-primary-foreground font-bold tracking-wide active:scale-[0.98] transition-all gap-1.5"
-                      >
-                        <Swords className="size-4" /> ⚔️ 이 선수와 경기하기
-                      </Button>
+                      {isStudentView ? (
+                        <div className="mt-5 w-full text-center py-2.5 rounded-lg border border-neon-blue/30 bg-neon-blue/5 text-neon-blue text-xs font-black tracking-wide flex items-center justify-center gap-1.5 shadow-[0_0_12px_rgba(0,180,216,0.1)]">
+                          <Swords className="size-4 animate-pulse" /> ⚔️ 추천 도전 라이벌
+                        </div>
+                      ) : (
+                        <Button
+                          onClick={() => onSelectRecommendedMatch(player.id, s.id)}
+                          className="mt-5 w-full bg-gradient-to-r from-neon-blue/80 to-tier-diamond hover:from-neon-blue hover:to-tier-diamond text-primary-foreground font-bold tracking-wide active:scale-[0.98] transition-all gap-1.5"
+                        >
+                          <Swords className="size-4" /> ⚔️ 이 선수와 경기하기
+                        </Button>
+                      )}
                     </Card>
                   );
                 })

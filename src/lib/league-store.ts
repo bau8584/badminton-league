@@ -50,6 +50,7 @@ type UserSession = {
   schoolName: string;
   userName: string;
   scriptUrl: string;
+  studentId?: string;
 } | null;
 
 export function useLeagueStore() {
@@ -101,8 +102,14 @@ export function useLeagueStore() {
     }
   }, [session]);
 
-  // 2. 로그인 수행 함수 (간편 로그인 시스템 도입 - 이메일/PW 제거)
-  const loginUser = useCallback(async (schoolName: string, accessCodeOrName: string, role: "MASTER" | "TEACHER" | "STUDENT") => {
+  // 2. 로그인 수행 함수 (간편 로그인 시스템 도입 - 이메일/PW 제거, 동명이인 방지 추가)
+  const loginUser = useCallback(async (
+    schoolName: string, 
+    accessCodeOrName: string, 
+    role: "MASTER" | "TEACHER" | "STUDENT",
+    studentGrade?: number,
+    studentClass?: number
+  ) => {
     const cleanedSchool = schoolName.trim();
     const cleanedCode = accessCodeOrName.trim();
 
@@ -165,7 +172,7 @@ export function useLeagueStore() {
         return { success: true };
       }
 
-      // 2. 청림초등학교 학생 바로 로그인 매핑 지름길 (원격 명렬 자동 하이드레이션)
+      // 2. 청림초등학교 학생 바로 로그인 매핑 지름길 (원격 명렬 자동 하이드레이션 + 동명이인 대응)
       if (role === "STUDENT" && (cleanedSchool === "청림초" || cleanedSchool === "청림초등학교")) {
         let activeStudents = students;
         const 청림초_scriptUrl = "https://script.google.com/macros/s/AKfycbxXC4J6zKWq_vEEbh_CnARl9V6SD9Dtt_nk1oMcmIZHTJVU5XdqV8xYM5d5YkOu6COEYA/exec";
@@ -190,20 +197,26 @@ export function useLeagueStore() {
           activeStudents = loadJSON<Student[]>(STUDENTS_KEY, SEED_STUDENTS);
         }
 
-        const exists = activeStudents.some((s) => s.name === cleanedCode);
-        if (exists) {
+        const matchStudent = activeStudents.find((s) => 
+          s.name === cleanedCode && 
+          (studentGrade === undefined || s.grade === studentGrade) &&
+          (studentClass === undefined || s.classNum === studentClass)
+        );
+
+        if (matchStudent) {
           const studentSession = {
-            loginId: "student_" + cleanedCode,
+            loginId: "student_" + cleanedCode + "_" + matchStudent.id,
             role: "STUDENT" as const,
             schoolName: "청림초등학교",
             userName: cleanedCode,
+            studentId: matchStudent.id,
             scriptUrl: 청림초_scriptUrl
           };
           setSession(studentSession);
           saveJSON(SESSION_KEY, studentSession);
           return { success: true };
         } else {
-          return { success: false, message: `청림초등학교 명단에 '${cleanedCode}' 학생이 존재하지 않습니다. 교사에게 문의하세요.` };
+          return { success: false, message: `청림초등학교 명단에 '${studentGrade}학년 ${studentClass}반 ${cleanedCode}' 학생이 존재하지 않습니다. 교사에게 문의하세요.` };
         }
       }
 
@@ -265,15 +278,20 @@ export function useLeagueStore() {
           }
           return { success: true };
         } else if (role === "STUDENT") {
-          // Fallback student local check
+          // Fallback student local check (동명이인 대응)
           const activeStudents = students.length > 0 ? students : loadJSON<Student[]>(STUDENTS_KEY, SEED_STUDENTS);
-          const exists = activeStudents.some((s) => s.name === cleanedCode);
-          if (exists) {
+          const matchStudent = activeStudents.find((s) => 
+            s.name === cleanedCode &&
+            (studentGrade === undefined || s.grade === studentGrade) &&
+            (studentClass === undefined || s.classNum === studentClass)
+          );
+          if (matchStudent) {
             const studentSession = {
-              loginId: "student_" + cleanedCode,
+              loginId: "student_" + cleanedCode + "_" + matchStudent.id,
               role: "STUDENT" as const,
               schoolName: cleanedSchool,
               userName: cleanedCode,
+              studentId: matchStudent.id,
               scriptUrl: ""
             };
             setSession(studentSession);
@@ -303,13 +321,18 @@ export function useLeagueStore() {
         }
       } else if (role === "STUDENT") {
         const activeStudents = students.length > 0 ? students : loadJSON<Student[]>(STUDENTS_KEY, SEED_STUDENTS);
-        const exists = activeStudents.some((s) => s.name === cleanedCode);
-        if (exists) {
+        const matchStudent = activeStudents.find((s) => 
+          s.name === cleanedCode &&
+          (studentGrade === undefined || s.grade === studentGrade) &&
+          (studentClass === undefined || s.classNum === studentClass)
+        );
+        if (matchStudent) {
           const studentSession = {
-            loginId: "student_" + cleanedCode,
+            loginId: "student_" + cleanedCode + "_" + matchStudent.id,
             role: "STUDENT" as const,
             schoolName: cleanedSchool,
             userName: cleanedCode,
+            studentId: matchStudent.id,
             scriptUrl: ""
           };
           setSession(studentSession);
