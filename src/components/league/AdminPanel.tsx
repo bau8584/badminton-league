@@ -18,9 +18,10 @@ import {
   Save
 } from "lucide-react";
 import type { Gender, Student, Match, TierName } from "@/lib/league-types";
-import { getTier, TIER_STYLES } from "@/lib/league-types";
+import { getTier, TIER_STYLES, getFullTierLabel } from "@/lib/league-types";
 import { GenderMark } from "./GenderMark";
 import { TierBadge } from "./TierBadge";
+import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
@@ -258,7 +259,7 @@ export function AdminPanel({
     const rows = sortedStudents.map((s, index) => {
       const total = s.wins + s.losses;
       const winRate = total === 0 ? 0 : Math.round((s.wins / total) * 100);
-      const tierLabel = TIER_STYLES[getTier(s.rp, thresholds)].label;
+      const tierLabel = getFullTierLabel(s.rp, thresholds);
       const genderLabel = s.gender === "M" ? "남" : s.gender === "F" ? "여" : "미지정";
       
       return [
@@ -966,64 +967,91 @@ export function AdminPanel({
         </div>
 
         <div className="space-y-6 pt-2">
-          {/* Tier Thresholds Inputs Group */}
+          {/* Tier Thresholds Inputs Group with Sliders */}
           <div>
-            <span className="text-xs text-neon-blue font-bold uppercase tracking-wider block mb-3">티어별 최저 RP 기준점 (Tier Cutoffs)</span>
-            <div className="grid gap-3 grid-cols-2 sm:grid-cols-5">
+            <span className="text-xs text-neon-blue font-bold uppercase tracking-wider block mb-3">티어별 최저 RP 기준점 (Tier Cutoffs Sliders)</span>
+            <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-5 bg-card/40 p-5 rounded-2xl border border-border/30">
+              
               {/* Bronze */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-tier-bronze block">브론즈</label>
-                <Input
-                  type="number"
-                  value={inputBronze}
-                  onChange={(e) => setInputBronze(e.target.value)}
-                  className="font-mono font-bold bg-background/60 border-tier-bronze/30 text-tier-bronze focus-visible:ring-tier-bronze"
+              <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold text-tier-bronze">브론즈</label>
+                  <span className="font-mono text-xs font-bold text-tier-bronze bg-tier-bronze/10 px-2 py-0.5 rounded">{inputBronze} RP</span>
+                </div>
+                <Slider
+                  value={[parseInt(inputBronze, 10) || 0]}
+                  onValueChange={(val) => setInputBronze(val[0].toString())}
+                  min={0}
+                  max={1000}
+                  step={10}
+                  className="py-2"
                 />
               </div>
 
               {/* Silver */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-tier-silver block">실버</label>
-                <Input
-                  type="number"
-                  value={inputSilver}
-                  onChange={(e) => setInputSilver(e.target.value)}
-                  className="font-mono font-bold bg-background/60 border-tier-silver/30 text-tier-silver focus-visible:ring-tier-silver"
+              <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold text-tier-silver">실버</label>
+                  <span className="font-mono text-xs font-bold text-tier-silver bg-tier-silver/10 px-2 py-0.5 rounded">{inputSilver} RP</span>
+                </div>
+                <Slider
+                  value={[parseInt(inputSilver, 10) || 0]}
+                  onValueChange={(val) => setInputSilver(val[0].toString())}
+                  min={500}
+                  max={2000}
+                  step={10}
+                  className="py-2"
                 />
               </div>
 
               {/* Gold */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-tier-gold block">골드</label>
-                <Input
-                  type="number"
-                  value={inputGold}
-                  onChange={(e) => setInputGold(e.target.value)}
-                  className="font-mono font-bold bg-background/60 border-tier-gold/30 text-tier-gold focus-visible:ring-tier-gold"
+              <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold text-tier-gold">골드</label>
+                  <span className="font-mono text-xs font-bold text-tier-gold bg-tier-gold/10 px-2 py-0.5 rounded">{inputGold} RP</span>
+                </div>
+                <Slider
+                  value={[parseInt(inputGold, 10) || 0]}
+                  onValueChange={(val) => setInputGold(val[0].toString())}
+                  min={800}
+                  max={2500}
+                  step={10}
+                  className="py-2"
                 />
               </div>
 
               {/* Platinum */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-tier-platinum block">플래티넘</label>
-                <Input
-                  type="number"
-                  value={inputPlatinum}
-                  onChange={(e) => setInputPlatinum(e.target.value)}
-                  className="font-mono font-bold bg-background/60 border-tier-platinum/30 text-tier-platinum focus-visible:ring-tier-platinum"
+              <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold text-tier-platinum">플래티넘</label>
+                  <span className="font-mono text-xs font-bold text-tier-platinum bg-tier-platinum/10 px-2 py-0.5 rounded">{inputPlatinum} RP</span>
+                </div>
+                <Slider
+                  value={[parseInt(inputPlatinum, 10) || 0]}
+                  onValueChange={(val) => setInputPlatinum(val[0].toString())}
+                  min={1000}
+                  max={3000}
+                  step={10}
+                  className="py-2"
                 />
               </div>
 
               {/* Diamond */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-tier-diamond block">다이아몬드</label>
-                <Input
-                  type="number"
-                  value={inputDiamond}
-                  onChange={(e) => setInputDiamond(e.target.value)}
-                  className="font-mono font-bold bg-background/60 border-tier-diamond/30 text-tier-diamond focus-visible:ring-tier-diamond"
+              <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold text-tier-diamond">다이아몬드</label>
+                  <span className="font-mono text-xs font-bold text-tier-diamond bg-tier-diamond/10 px-2 py-0.5 rounded">{inputDiamond} RP</span>
+                </div>
+                <Slider
+                  value={[parseInt(inputDiamond, 10) || 0]}
+                  onValueChange={(val) => setInputDiamond(val[0].toString())}
+                  min={1200}
+                  max={3500}
+                  step={10}
+                  className="py-2"
                 />
               </div>
+
             </div>
           </div>
 

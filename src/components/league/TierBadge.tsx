@@ -1,4 +1,4 @@
-import { getTier, TIER_STYLES, type TierName } from "@/lib/league-types";
+import { getTier, TIER_STYLES, getFullTierLabel, type TierName } from "@/lib/league-types";
 import { cn } from "@/lib/utils";
 
 export function TierBadge({ rp, thresholds }: { rp: number; thresholds?: Record<TierName, number> }) {
@@ -12,7 +12,7 @@ export function TierBadge({ rp, thresholds }: { rp: number; thresholds?: Record<
       )}
     >
       <span className="size-1.5 rounded-full bg-current" />
-      {s.label}
+      {getFullTierLabel(rp, thresholds)}
     </span>
   );
 }

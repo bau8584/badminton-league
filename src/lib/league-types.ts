@@ -33,6 +33,54 @@ export function getTier(rp: number, thresholds?: Record<TierName, number>): Tier
   return "Bronze";
 }
 
+export function getTierSubdivision(rp: number, thresholds?: Record<TierName, number>): number {
+  const t = thresholds || { Bronze: 0, Silver: 1000, Gold: 1200, Platinum: 1400, Diamond: 1600 };
+  const tier = getTier(rp, thresholds);
+  
+  if (tier === "Diamond") {
+    const diff = rp - (t.Diamond ?? 1600);
+    if (diff >= 300) return 1;
+    if (diff >= 200) return 2;
+    if (diff >= 100) return 3;
+    return 4;
+  }
+  
+  let currentCutoff = 0;
+  let nextCutoff = 1000;
+  
+  if (tier === "Bronze") {
+    currentCutoff = t.Bronze ?? 0;
+    nextCutoff = t.Silver ?? 1000;
+  } else if (tier === "Silver") {
+    currentCutoff = t.Silver ?? 1000;
+    nextCutoff = t.Gold ?? 1200;
+  } else if (tier === "Gold") {
+    currentCutoff = t.Gold ?? 1200;
+    nextCutoff = t.Platinum ?? 1400;
+  } else if (tier === "Platinum") {
+    currentCutoff = t.Platinum ?? 1400;
+    nextCutoff = t.Diamond ?? 1600;
+  }
+  
+  const range = nextCutoff - currentCutoff;
+  if (range <= 0) return 4;
+  
+  const step = range / 4;
+  const relativeRp = rp - currentCutoff;
+  
+  if (relativeRp < step) return 4;
+  if (relativeRp < 2 * step) return 3;
+  if (relativeRp < 3 * step) return 2;
+  return 1;
+}
+
+export function getFullTierLabel(rp: number, thresholds?: Record<TierName, number>): string {
+  const tier = getTier(rp, thresholds);
+  const sub = getTierSubdivision(rp, thresholds);
+  const style = TIER_STYLES[tier];
+  return `${style.label} ${sub}`;
+}
+
 export const TIER_ORDER: TierName[] = ["Diamond", "Platinum", "Gold", "Silver", "Bronze"];
 
 export const TIER_STYLES: Record<TierName, { bg: string; text: string; ring: string; label: string }> = {

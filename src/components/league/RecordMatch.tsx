@@ -6,7 +6,7 @@ import { GenderMark } from "./GenderMark";
 import { cn } from "@/lib/utils";
 import { Trophy, X, Lock, Sparkles } from "lucide-react";
 import type { Student } from "@/lib/league-types";
-import { getTier, TIER_ORDER } from "@/lib/league-types";
+import { getTier, getTierSubdivision, TIER_ORDER } from "@/lib/league-types";
 import { toast } from "sonner";
 
 const GRADES = [1, 2, 3, 4, 5, 6];
@@ -150,11 +150,15 @@ export function RecordMatch({
 
     const losePrevRp = loserPlayer.rp;
     const losePrevTier = getTier(losePrevRp, thresholds);
-    const loseFinalRp = Math.max(0, losePrevRp - (rpVariables?.loseDelta ?? 20));
+    const loseFinalRp = Math.max(0, loserPlayer.rp - (rpVariables?.loseDelta ?? 20));
     const loseFinalTier = getTier(loseFinalRp, thresholds);
 
-    // Promotion check: higher rank means index in TIER_ORDER is lower
-    const promoted = TIER_ORDER.indexOf(winFinalTier) < TIER_ORDER.indexOf(winPrevTier);
+    // Promotion check: higher rank means index in TIER_ORDER is lower or same tier but higher subdivision (lower number)
+    const winPrevSub = getTierSubdivision(winPrevRp, thresholds);
+    const winFinalSub = getTierSubdivision(winFinalRp, thresholds);
+    const basePromoted = TIER_ORDER.indexOf(winFinalTier) < TIER_ORDER.indexOf(winPrevTier);
+    const subPromoted = winFinalTier === winPrevTier && winFinalSub < winPrevSub;
+    const promoted = basePromoted || subPromoted;
 
     // 3. Set match result details for the modal
     setResultData({
