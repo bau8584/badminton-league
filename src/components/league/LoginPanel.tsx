@@ -122,7 +122,7 @@ export function LoginPanel({
       if (res.success) {
         toast.success(`${schoolName} 교사 권한으로 접속했습니다!`);
       } else {
-        toast.error(res.message || "인증코드가 일치하지 않습니다. (기본코드: 1234)");
+        toast.error(res.message || "인증코드가 일치하지 않습니다.");
       }
     } else {
       if (!studentGrade) {
@@ -358,12 +358,6 @@ export function LoginPanel({
                 <div className="space-y-1.5 animate-in fade-in duration-200">
                   <div className="flex justify-between items-center">
                     <Label className="text-xs font-bold text-foreground">교사 인증코드</Label>
-                    <span className="text-[10px] text-muted-foreground font-mono">
-                      {schoolName.trim() === "청림초" || schoolName.trim() === "청림초등학교" 
-                        ? "(박주현 교사 전용 활성화)" 
-                        : "(기본코드: 1234)"
-                      }
-                    </span>
                   </div>
                   <Input
                     required
