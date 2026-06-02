@@ -53,7 +53,8 @@ function Index() {
     deleteStudent,
     restoreFromCSV,
     bulkDecayRP,
-    teacherAccessCode
+    teacherAccessCode,
+    updateMatchScore
   } = useLeagueStore();
 
   const [tab, setTab] = useState<Tab>("leaderboard");
@@ -357,6 +358,7 @@ function Index() {
                 onRestoreFromCSV={restoreFromCSV}
                 onBulkDecay={bulkDecayRP}
                 teacherAccessCode={teacherAccessCode}
+                onUpdateMatchScore={updateMatchScore}
               />
             )}
           </>

@@ -15,7 +15,9 @@ import {
   Download, 
   User, 
   ShieldAlert,
-  Save
+  Save,
+  Pencil,
+  Swords
 } from "lucide-react";
 import type { Gender, Student, Match, TierName } from "@/lib/league-types";
 import { getTier, TIER_STYLES, getFullTierLabel } from "@/lib/league-types";
@@ -90,6 +92,7 @@ export function AdminPanel({
   onRestoreFromCSV,
   onBulkDecay,
   teacherAccessCode,
+  onUpdateMatchScore,
 }: {
   students: Student[];
   matches: Match[];
@@ -108,6 +111,7 @@ export function AdminPanel({
   onRestoreFromCSV?: (students: Student[], matches: Match[]) => void;
   onBulkDecay?: (inactiveDays: number, decayAmount: number) => number;
   teacherAccessCode: string;
+  onUpdateMatchScore: (matchId: string, scoreA: number, scoreB: number) => void;
 }) {
   // CSV 롤백 복원 상태
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
@@ -117,12 +121,35 @@ export function AdminPanel({
   // 이중 보안 상태 및 자동 잠금 훅
   const [isUnlocked, setIsUnlocked] = useState(false);
 
+  // 경기 점수 세부 수정 기능 상태
+  const [editingMatchId, setEditingMatchId] = useState<string | null>(null);
+  const [editScoreA, setEditScoreA] = useState<string>("");
+  const [editScoreB, setEditScoreB] = useState<string>("");
+
   useEffect(() => {
     setIsUnlocked(false);
     return () => {
       setIsUnlocked(false);
     };
   }, []);
+
+  const handleSaveScoreEdit = () => {
+    if (!editingMatchId) return;
+    const sA = parseInt(editScoreA, 10);
+    const sB = parseInt(editScoreB, 10);
+
+    if (isNaN(sA) || sA < 0 || isNaN(sB) || sB < 0) {
+      return toast.error("올바른 점수 값을 입력해 주세요 (0점 이상).");
+    }
+
+    if (sA === sB) {
+      return toast.error("경기는 동점으로 끝날 수 없습니다. 승패가 결정되는 점수를 입력해 주세요.");
+    }
+
+    onUpdateMatchScore(editingMatchId, sA, sB);
+    setEditingMatchId(null);
+    toast.success("경기 점수가 수정되었으며 두 학생의 보너스 및 최종 RP가 오차 없이 즉시 재계산되어 덮어씌워졌습니다!");
+  };
 
 
 
@@ -1230,6 +1257,258 @@ export function AdminPanel({
           </Button>
         </div>
       </Card>
+
+      {/* 3.9. All Match Records Integrated Management Section (전체 경기 기록 통합 관리) */}
+      <Card className="border border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl relative overflow-hidden">
+        <div className="mb-4">
+          <div className="flex items-center gap-2 text-neon-blue">
+            <Swords className="size-5" />
+            <h3 className="font-black text-lg">전체 경기 기록 통합 관리</h3>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            리그에 기록된 모든 매치 데이터를 조회하고, 경기 점수를 소급 수정하거나 완전 삭제하여 RP 및 전적을 안전하게 롤백 복원합니다. (태블릿 환경 최적화)
+          </p>
+        </div>
+
+        {/* Matches table container with horizontal scroll for smaller screens / tablets */}
+        <div className="overflow-x-auto rounded-xl border border-border/30 bg-muted/5">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/30">
+              <tr>
+                <th className="px-4 py-3">경기 일시</th>
+                <th className="px-4 py-3">대결 학생 A</th>
+                <th className="px-4 py-3 text-center">점수</th>
+                <th className="px-4 py-3">대결 학생 B</th>
+                <th className="px-4 py-3">RP 및 획득 보상 변동 내역</th>
+                <th className="px-4 py-3 text-right">관리 작업</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matches && matches.length > 0 ? (
+                [...matches]
+                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                  .map((m) => {
+                    const playerA = students.find((s) => s.id === m.playerAId) ?? {
+                      name: "알 수 없는 학생",
+                      grade: 0,
+                      classNum: 0,
+                      number: 0,
+                      gender: "U" as Gender
+                    };
+                    const playerB = students.find((s) => s.id === m.playerBId) ?? {
+                      name: "알 수 없는 학생",
+                      grade: 0,
+                      classNum: 0,
+                      number: 0,
+                      gender: "U" as Gender
+                    };
+
+                    const aWon = m.scoreA > m.scoreB;
+                    const matchDateStr = new Date(m.date).toLocaleString("ko-KR", {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit"
+                    });
+
+                    // Gather individual bonuses to display as premium badges
+                    const bonusesA = [];
+                    if (m.rivalBonusA && m.rivalBonusA > 0) bonusesA.push("⚔️ 라이벌 (+5)");
+                    if (m.firstWinBonusA && m.firstWinBonusA > 0) bonusesA.push("🌟 첫승 (+15)");
+                    if (m.revengeBonusA && m.revengeBonusA > 0) bonusesA.push("😈 복수 (+10)");
+                    if (m.underdogBonusA && m.underdogBonusA > 0) bonusesA.push(`🛡️ 언더독 (+${m.underdogBonusA})`);
+                    if (m.scoreDiffBonusA && m.scoreDiffBonusA > 0) bonusesA.push(`🔥 압승 (+${m.scoreDiffBonusA})`);
+
+                    const bonusesB = [];
+                    if (m.rivalBonusB && m.rivalBonusB > 0) bonusesB.push("⚔️ 라이벌 (+5)");
+                    if (m.firstWinBonusB && m.firstWinBonusB > 0) bonusesB.push("🌟 첫승 (+15)");
+                    if (m.revengeBonusB && m.revengeBonusB > 0) bonusesB.push("😈 복수 (+10)");
+                    if (m.underdogBonusB && m.underdogBonusB > 0) bonusesB.push(`🛡️ 언더독 (+${m.underdogBonusB})`);
+                    if (m.scoreDiffBonusB && m.scoreDiffBonusB > 0) bonusesB.push(`🔥 압승 (+${m.scoreDiffBonusB})`);
+
+                    return (
+                      <tr key={m.id} className="border-b border-border/20 hover:bg-accent/10 transition-colors">
+                        {/* 1. Date */}
+                        <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{matchDateStr}</td>
+                        
+                        {/* 2. Player A */}
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <GenderMark gender={playerA.gender} className="size-3.5 text-[9px]" />
+                            <span className={cn("font-bold", aWon && "text-neon-blue")}>{playerA.name}</span>
+                            <span className="text-[10px] text-muted-foreground">({playerA.grade}-{playerA.classNum})</span>
+                          </div>
+                        </td>
+
+                        {/* 3. Score */}
+                        <td className="px-4 py-3 text-center whitespace-nowrap">
+                          <span className="font-mono font-bold bg-muted/60 px-2.5 py-1 rounded text-sm select-none">
+                            <span className={cn(aWon ? "text-win" : "text-loss")}>{m.scoreA}</span>
+                            <span className="text-muted-foreground mx-1">:</span>
+                            <span className={cn(!aWon ? "text-win" : "text-loss")}>{m.scoreB}</span>
+                          </span>
+                        </td>
+
+                        {/* 4. Player B */}
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <GenderMark gender={playerB.gender} className="size-3.5 text-[9px]" />
+                            <span className={cn("font-bold", !aWon && "text-neon-blue")}>{playerB.name}</span>
+                            <span className="text-[10px] text-muted-foreground">({playerB.grade}-{playerB.classNum})</span>
+                          </div>
+                        </td>
+
+                        {/* 5. RP Deltas and Audited Bonuses */}
+                        <td className="px-4 py-3 max-w-[240px] sm:max-w-xs md:max-w-md lg:max-w-lg">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={cn("font-mono font-bold text-[10px]", aWon ? "text-win" : "text-loss")}>
+                                {playerA.name}: {m.rpDeltaA !== undefined ? (m.rpDeltaA > 0 ? `+${m.rpDeltaA}` : m.rpDeltaA) : 0} RP
+                              </span>
+                              <span className="text-muted-foreground/45 text-[10px]">|</span>
+                              <span className={cn("font-mono font-bold text-[10px]", !aWon ? "text-win" : "text-loss")}>
+                                {playerB.name}: {m.rpDeltaB !== undefined ? (m.rpDeltaB > 0 ? `+${m.rpDeltaB}` : m.rpDeltaB) : 0} RP
+                              </span>
+                            </div>
+
+                            {/* Render visual badges for bonuses A */}
+                            {bonusesA.length > 0 && (
+                              <div className="flex items-center gap-1 flex-wrap mt-1">
+                                <span className="text-[9px] text-muted-foreground font-semibold shrink-0">{playerA.name} 보상:</span>
+                                {bonusesA.map((b, idx) => (
+                                  <span key={idx} className="bg-neon-blue/10 text-neon-blue border border-neon-blue/20 text-[8px] font-bold px-1.5 py-0.5 rounded">
+                                    {b}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Render visual badges for bonuses B */}
+                            {bonusesB.length > 0 && (
+                              <div className="flex items-center gap-1 flex-wrap mt-1">
+                                <span className="text-[9px] text-muted-foreground font-semibold shrink-0">{playerB.name} 보상:</span>
+                                {bonusesB.map((b, idx) => (
+                                  <span key={idx} className="bg-neon-blue/10 text-neon-blue border border-neon-blue/20 text-[8px] font-bold px-1.5 py-0.5 rounded">
+                                    {b}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* 6. Tablet Actions panel */}
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Score Edit Button */}
+                            <Button
+                              onClick={() => {
+                                setEditingMatchId(m.id);
+                                setEditScoreA(m.scoreA.toString());
+                                setEditScoreB(m.scoreB.toString());
+                              }}
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2.5 rounded-lg border-border/80 text-foreground hover:bg-accent/40 active:scale-95 transition-all text-[11px] font-bold"
+                              title="경기 점수 수정"
+                            >
+                              <Pencil className="size-3.5 mr-1" /> 수정
+                            </Button>
+
+                            {/* Record Delete & RP Rollback Button */}
+                            <Button
+                              onClick={() => {
+                                const deltaWinner = aWon ? (m.rpDeltaA !== undefined ? Math.abs(m.rpDeltaA) : 25) : (m.rpDeltaB !== undefined ? Math.abs(m.rpDeltaB) : 25);
+                                const deltaLoser = !aWon ? (m.rpDeltaA !== undefined ? Math.abs(m.rpDeltaA) : 20) : (m.rpDeltaB !== undefined ? Math.abs(m.rpDeltaB) : 20);
+
+                                if (window.confirm(`정말로 이 경기 기록(VS ${playerB.name})을 삭제하시겠습니까?\n\n두 학생의 RP가 경기 이전 상태로 완벽하게 롤백 복원됩니다.\n- ${playerA.name}: RP ${aWon ? "-" : "+"}${deltaWinner}\n- ${playerB.name}: RP ${!aWon ? "-" : "+"}${deltaLoser}`)) {
+                                  onDeleteMatch(m.id);
+                                  toast.success("경기 기록이 완벽히 삭제되었으며 두 학생의 RP 및 전적이 경기 이전으로 롤백 복구되었습니다!");
+                                }
+                              }}
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg active:scale-95 transition-all shrink-0"
+                              title="이 경기 삭제 및 안전 롤백"
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+              ) : (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-muted-foreground font-medium bg-muted/5">
+                    기록된 전체 경기 매치 내역이 전혀 존재하지 않습니다.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {/* Inline Score Edit Modal Overlaid (Radix Dialog style custom state overlay) */}
+      {editingMatchId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <Card className="max-w-sm w-full border border-border/80 bg-background p-6 shadow-2xl rounded-2xl relative z-50 animate-in zoom-in-95 duration-200">
+            <h4 className="text-base font-black mb-1 flex items-center gap-1.5 text-foreground">
+              <Pencil className="size-4.5 text-neon-blue" /> 경기 세부 점수 수정
+            </h4>
+            <p className="text-xs text-muted-foreground leading-relaxed mb-4">
+              경기 결과를 수정하면 바뀐 점수를 기반으로 점수차 비례 보상 등의 보너스 및 최종 RP가 오차 없이 다시 자동 계산되어 두 학생에게 즉시 덮어씌워집니다.
+            </p>
+
+            <div className="grid grid-cols-2 gap-4 bg-muted/20 p-4 rounded-xl border border-border/30 mb-5">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  A 선수 점수
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={editScoreA}
+                  onChange={(e) => setEditScoreA(e.target.value)}
+                  className="font-mono font-bold text-center text-lg h-12 bg-background"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  B 선수 점수
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={editScoreB}
+                  onChange={(e) => setEditScoreB(e.target.value)}
+                  className="font-mono font-bold text-center text-lg h-12 bg-background"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={() => setEditingMatchId(null)}
+                variant="outline"
+                className="w-1/2 h-10 font-bold border-border/80 text-foreground rounded-xl"
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSaveScoreEdit}
+                className="w-1/2 h-10 font-black bg-neon-blue text-primary-foreground hover:opacity-90 rounded-xl"
+              >
+                저장 및 재계산
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* 4. Danger Zone: Global Reset with Password Verification */}
       <Card className="border border-destructive/40 bg-destructive/5 p-5 backdrop-blur shadow-lg">

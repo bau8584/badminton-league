@@ -949,6 +949,186 @@ export function useLeagueStore() {
     return affectedCount;
   }, [matches, tierThresholds, syncWithGoogleSheets]);
 
+  // 경기 점수 수정 및 보너스/RP 완벽 재계산 액션
+  const updateMatchScore = useCallback((matchId: string, nextScoreA: number, nextScoreB: number) => {
+    let updatedMatch: Match | null = null;
+    let nextMatchesList: Match[] = [];
+    let nextStudentsList: Student[] = [];
+
+    setMatches((prevMatches) => {
+      const match = prevMatches.find((m) => m.id === matchId);
+      if (!match) return prevMatches;
+
+      const playerAId = match.playerAId;
+      const playerBId = match.playerBId;
+      const oldAWon = match.scoreA > match.scoreB;
+      const oldRpDeltaA = match.rpDeltaA ?? 0;
+      const oldRpDeltaB = match.rpDeltaB ?? 0;
+
+      // 1. Rollback old match stats for both students to get their "pre-match" state
+      setStudents((prevStudents) => {
+        const rolledBackStudents = prevStudents.map((s) => {
+          if (s.id !== playerAId && s.id !== playerBId) return s;
+
+          const isA = s.id === playerAId;
+          const oldWon = isA ? oldAWon : !oldAWon;
+          const oldDelta = isA ? oldRpDeltaA : oldRpDeltaB;
+
+          // Rollback wins, losses, RP
+          const newRp = Math.max(0, s.rp - oldDelta);
+          const newWins = Math.max(0, s.wins - (oldWon ? 1 : 0));
+          const newLosses = Math.max(0, s.losses - (oldWon ? 0 : 1));
+
+          return {
+            ...s,
+            rp: newRp,
+            wins: newWins,
+            losses: newLosses,
+          };
+        });
+
+        // 2. Perform recalculation using the rolled back students
+        const playerA = rolledBackStudents.find((s) => s.id === playerAId)!;
+        const playerB = rolledBackStudents.find((s) => s.id === playerBId)!;
+
+        const aWon = nextScoreA > nextScoreB;
+        const winnerId = aWon ? playerAId : playerBId;
+        const loserId = aWon ? playerBId : playerAId;
+        const winnerPlayer = aWon ? playerA : playerB;
+        const loserPlayer = aWon ? playerB : playerA;
+
+        // A. Underdog bonus (최대 15점 캡)
+        let underdogBonus = 0;
+        if (winnerPlayer.rp < loserPlayer.rp) {
+          underdogBonus = Math.min(15, Math.floor((loserPlayer.rp - winnerPlayer.rp) * 0.1));
+        }
+
+        // B. Score difference bonus (최대 10점 캡)
+        const scoreDiff = Math.abs(nextScoreA - nextScoreB);
+        const scoreDiffBonus = Math.min(10, scoreDiff);
+
+        // C. Rival bonus (RP 차이 20점 이하 시 +5점)
+        const rpDiff = Math.abs(playerA.rp - playerB.rp);
+        const rivalBonus = rpDiff <= 20 ? 5 : 0;
+
+        // D. Daily first win bonus (+15점)
+        const today = new Date();
+        const offset = today.getTimezoneOffset();
+        const localToday = new Date(today.getTime() - (offset * 60 * 1000));
+        const todayYmd = localToday.toISOString().split("T")[0];
+        
+        const firstWinBonus = winnerPlayer.lastWinDate !== todayYmd ? 15 : 0;
+
+        // E. Revenge bonus (과거에 패했던 기록이 있을 시 +10점)
+        const pastMatches = prevMatches.filter((m) => m.id !== matchId);
+        const hasPastLoss = pastMatches.some((m) => {
+          const isCurrentWinnerA = m.playerAId === winnerId && m.playerBId === loserId;
+          const isCurrentWinnerB = m.playerBId === winnerId && m.playerAId === loserId;
+          if (isCurrentWinnerA) return m.scoreB > m.scoreA;
+          if (isCurrentWinnerB) return m.scoreA > m.scoreB;
+          return false;
+        });
+        const revengeBonus = hasPastLoss ? 10 : 0;
+
+        // F. Consolidated RP Deltas
+        const winDeltaTotal = rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus;
+        const loseDeltaTotal = -rpVariables.loseDelta;
+
+        const deltaA = aWon ? winDeltaTotal : loseDeltaTotal;
+        const deltaB = aWon ? loseDeltaTotal : winDeltaTotal;
+
+        // 3. Construct the updated Match record
+        updatedMatch = {
+          ...match,
+          scoreA: nextScoreA,
+          scoreB: nextScoreB,
+          rpDeltaA: deltaA,
+          rpDeltaB: deltaB,
+          underdogBonusA: aWon ? underdogBonus : 0,
+          underdogBonusB: !aWon ? underdogBonus : 0,
+          scoreDiffBonusA: aWon ? scoreDiffBonus : 0,
+          scoreDiffBonusB: !aWon ? scoreDiffBonus : 0,
+          rivalBonusA: aWon ? rivalBonus : 0,
+          rivalBonusB: !aWon ? rivalBonus : 0,
+          firstWinBonusA: aWon ? firstWinBonus : 0,
+          firstWinBonusB: !aWon ? firstWinBonus : 0,
+          revengeBonusA: aWon ? revengeBonus : 0,
+          revengeBonusB: !aWon ? revengeBonus : 0,
+        };
+
+        // 4. Update both students' stats with the new deltas
+        nextStudentsList = rolledBackStudents.map((s) => {
+          if (s.id !== playerAId && s.id !== playerBId) return s;
+
+          const isA = s.id === playerAId;
+          const won = isA ? aWon : !aWon;
+          const delta = isA ? deltaA : deltaB;
+
+          const preRp = s.rp;
+          const preTier = getTier(preRp, tierThresholds);
+          const preTierRank = TIER_RANKING[preTier] ?? 1;
+
+          let nextRp = preRp + delta;
+          let nextShields = s.demotionShields ?? 0;
+
+          if (won) {
+            const tentativeTier = getTier(nextRp, tierThresholds);
+            const tentativeTierRank = TIER_RANKING[tentativeTier] ?? 1;
+            if (tentativeTierRank > preTierRank) {
+              nextShields = 3; // 승급 시 3회 완충
+            }
+            nextRp = Math.max(0, nextRp);
+          } else {
+            const minThreshold = tierThresholds[preTier] ?? 0;
+            if (nextRp < minThreshold && preTier !== "Bronze") {
+              if (nextShields >= 1) {
+                nextRp = minThreshold;
+                nextShields = nextShields - 1;
+              } else {
+                nextRp = Math.max(0, nextRp);
+              }
+            } else {
+              nextRp = Math.max(0, nextRp);
+            }
+          }
+
+          // Build new recent array
+          const tempMatches = prevMatches.map((m) => m.id === matchId ? updatedMatch! : m);
+          const sMatches = tempMatches
+            .filter((m) => m.playerAId === s.id || m.playerBId === s.id)
+            .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
+            .slice(0, 5);
+
+          const newRecent = sMatches.map((m) => {
+            const mIsA = m.playerAId === s.id;
+            const mAWon = m.scoreA > m.scoreB;
+            const mWon = mIsA ? mAWon : !mAWon;
+            return mWon ? "W" : "L";
+          });
+
+          return {
+            ...s,
+            rp: nextRp,
+            wins: s.wins + (won ? 1 : 0),
+            losses: s.losses + (won ? 0 : 1),
+            recent: newRecent,
+            demotionShields: nextShields,
+            lastMatchDate: new Date().toISOString(),
+            lastWinDate: won ? todayYmd : s.lastWinDate,
+          };
+        });
+
+        // 5. Sync both updated datasets to Sheets in background
+        syncWithGoogleSheets(nextStudentsList, prevMatches.map((m) => m.id === matchId ? updatedMatch! : m));
+        return nextStudentsList;
+      });
+
+      // 6. Update matches list
+      nextMatchesList = prevMatches.map((m) => m.id === matchId ? updatedMatch! : m);
+      return nextMatchesList;
+    });
+  }, [matches, students, tierThresholds, rpVariables, syncWithGoogleSheets]);
+
   return { 
     hydrated, 
     students, 
@@ -976,6 +1156,7 @@ export function useLeagueStore() {
     deleteStudent,
     restoreFromCSV,
     bulkDecayRP,
-    teacherAccessCode
+    teacherAccessCode,
+    updateMatchScore
   };
 }
