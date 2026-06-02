@@ -134,6 +134,11 @@ export function AdminPanel({
   const [matchSearchDate, setMatchSearchDate] = useState("");
   const [matchSearchGradeClass, setMatchSearchGradeClass] = useState("");
 
+  // 실제 필터에 적용되는 검색어 상태 (버튼 클릭 / 엔터 시점에만 갱신하여 렉 발생 방지)
+  const [appliedSearchStudent, setAppliedSearchStudent] = useState("");
+  const [appliedSearchDate, setAppliedSearchDate] = useState("");
+  const [appliedSearchGradeClass, setAppliedSearchGradeClass] = useState("");
+
   useEffect(() => {
     setIsUnlocked(false);
     return () => {
@@ -173,8 +178,8 @@ export function AdminPanel({
     }
 
     if (matchFilterType === "student") {
-      const query = matchSearchStudent.trim().toLowerCase();
-      if (!query) return result;
+      const query = appliedSearchStudent.trim().toLowerCase();
+      if (!query) return []; // 검색하기 전에는 빈 배열 반환하여 버벅임 방지
       return result.filter((m) => {
         const playerA = students.find((s) => s.id === m.playerAId);
         const playerB = students.find((s) => s.id === m.playerBId);
@@ -186,8 +191,8 @@ export function AdminPanel({
     }
 
     if (matchFilterType === "date") {
-      const query = matchSearchDate.trim();
-      if (!query) return result;
+      const query = appliedSearchDate.trim();
+      if (!query) return []; // 검색하기 전에는 빈 배열 반환하여 버벅임 방지
       return result.filter((m) => {
         const mDate = new Date(m.date);
         const mMonth = mDate.getMonth() + 1;
@@ -223,8 +228,8 @@ export function AdminPanel({
     }
 
     if (matchFilterType === "class") {
-      const query = matchSearchGradeClass.trim();
-      if (!query) return result;
+      const query = appliedSearchGradeClass.trim();
+      if (!query) return []; // 검색하기 전에는 빈 배열 반환하여 버벅임 방지
 
       // 1. Grade-Class format like "6-1", "6 1", "6/1", "6학년 1반"
       const parts = query.split(/[\-\s\/학년반]+/);
@@ -266,7 +271,7 @@ export function AdminPanel({
     }
 
     return result;
-  }, [matches, students, matchFilterType, matchSearchStudent, matchSearchDate, matchSearchGradeClass]);
+  }, [matches, students, matchFilterType, appliedSearchStudent, appliedSearchDate, appliedSearchGradeClass]);
 
 
 
@@ -607,6 +612,409 @@ export function AdminPanel({
   return (
     <div className="space-y-6">
       
+      {/* 3.9. All Match Records Integrated Management Section (전체 경기 기록 통합 관리) */}
+      <Card className="border border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl relative overflow-hidden">
+        <div className="mb-4">
+          <div className="flex items-center gap-2 text-neon-blue">
+            <Swords className="size-5" />
+            <h3 className="font-black text-lg">전체 경기 기록 통합 관리</h3>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            리그에 기록된 모든 매치 데이터를 조회하고, 경기 점수를 소급 수정하거나 완전 삭제하여 RP 및 전적을 안전하게 롤백 복원합니다. (태블릿 환경 최적화)
+          </p>
+        </div>
+
+        {/* Category Selector Tabs & Inputs for Dynamic Loading/Filtering */}
+        <div className="mb-5 space-y-3">
+          <div className="p-1 bg-muted/40 border border-border/20 rounded-xl flex flex-wrap gap-1.5 w-full md:w-max">
+            <button
+              onClick={() => {
+                setMatchFilterType("recent");
+                setMatchSearchStudent("");
+                setMatchSearchDate("");
+                setMatchSearchGradeClass("");
+                setAppliedSearchStudent("");
+                setAppliedSearchDate("");
+                setAppliedSearchGradeClass("");
+              }}
+              className={cn(
+                "px-3.5 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 transition-all active:scale-95",
+                matchFilterType === "recent"
+                  ? "bg-neon-blue/15 text-neon-blue border border-neon-blue/35 shadow-sm shadow-neon-blue/10"
+                  : "text-muted-foreground hover:text-foreground border border-transparent hover:bg-muted/50"
+              )}
+            >
+              <Swords className="size-3.5" />
+              최근 20경기
+            </button>
+            <button
+              onClick={() => {
+                setMatchFilterType("student");
+                setMatchSearchStudent("");
+                setMatchSearchDate("");
+                setMatchSearchGradeClass("");
+                setAppliedSearchStudent("");
+                setAppliedSearchDate("");
+                setAppliedSearchGradeClass("");
+              }}
+              className={cn(
+                "px-3.5 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 transition-all active:scale-95",
+                matchFilterType === "student"
+                  ? "bg-neon-blue/15 text-neon-blue border border-neon-blue/35 shadow-sm shadow-neon-blue/10"
+                  : "text-muted-foreground hover:text-foreground border border-transparent hover:bg-muted/50"
+              )}
+            >
+              <Search className="size-3.5" />
+              학생 이름 검색
+            </button>
+            <button
+              onClick={() => {
+                setMatchFilterType("date");
+                setMatchSearchStudent("");
+                setMatchSearchDate("");
+                setMatchSearchGradeClass("");
+                setAppliedSearchStudent("");
+                setAppliedSearchDate("");
+                setAppliedSearchGradeClass("");
+              }}
+              className={cn(
+                "px-3.5 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 transition-all active:scale-95",
+                matchFilterType === "date"
+                  ? "bg-neon-blue/15 text-neon-blue border border-neon-blue/35 shadow-sm shadow-neon-blue/10"
+                  : "text-muted-foreground hover:text-foreground border border-transparent hover:bg-muted/50"
+              )}
+            >
+              <Calendar className="size-3.5" />
+              날짜 검색 (6/2 등)
+            </button>
+            <button
+              onClick={() => {
+                setMatchFilterType("class");
+                setMatchSearchStudent("");
+                setMatchSearchDate("");
+                setMatchSearchGradeClass("");
+                setAppliedSearchStudent("");
+                setAppliedSearchDate("");
+                setAppliedSearchGradeClass("");
+              }}
+              className={cn(
+                "px-3.5 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 transition-all active:scale-95",
+                matchFilterType === "class"
+                  ? "bg-neon-blue/15 text-neon-blue border border-neon-blue/35 shadow-sm shadow-neon-blue/10"
+                  : "text-muted-foreground hover:text-foreground border border-transparent hover:bg-muted/50"
+              )}
+            >
+              <Users className="size-3.5" />
+              학년·반 검색 (6-1 등)
+            </button>
+          </div>
+
+          {/* Conditional search inputs with premium glass style */}
+          {matchFilterType === "student" && (
+            <div className="flex gap-2 max-w-md w-full animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/75" />
+                <Input
+                  type="text"
+                  placeholder="조회할 학생 이름을 입력하세요..."
+                  value={matchSearchStudent}
+                  onChange={(e) => setMatchSearchStudent(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      setAppliedSearchStudent(matchSearchStudent);
+                    }
+                  }}
+                  className="pl-10 pr-16 h-10 border-border/50 bg-background/40 hover:bg-background/60 focus:bg-background/80 transition-all font-sans text-xs"
+                />
+                {matchSearchStudent && (
+                  <button
+                    onClick={() => {
+                      setMatchSearchStudent("");
+                      setAppliedSearchStudent("");
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground hover:text-foreground bg-muted/65 hover:bg-muted px-2 py-1 rounded-md transition-colors"
+                  >
+                    지우기
+                  </button>
+                )}
+              </div>
+              <Button
+                onClick={() => setAppliedSearchStudent(matchSearchStudent)}
+                className="bg-neon-blue hover:bg-neon-blue/80 text-primary-foreground font-bold h-10 px-4 shrink-0 transition-all active:scale-95 rounded-xl shadow-md font-sans text-xs"
+              >
+                검색
+              </Button>
+            </div>
+          )}
+
+          {matchFilterType === "date" && (
+            <div className="flex gap-2 max-w-md w-full animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="relative flex-1">
+                <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/75" />
+                <Input
+                  type="text"
+                  placeholder="조회할 날짜를 입력하세요 (예: 6/2, 6월 2일)..."
+                  value={matchSearchDate}
+                  onChange={(e) => setMatchSearchDate(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      setAppliedSearchDate(matchSearchDate);
+                    }
+                  }}
+                  className="pl-10 pr-16 h-10 border-border/50 bg-background/40 hover:bg-background/60 focus:bg-background/80 transition-all font-sans text-xs"
+                />
+                {matchSearchDate && (
+                  <button
+                    onClick={() => {
+                      setMatchSearchDate("");
+                      setAppliedSearchDate("");
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground hover:text-foreground bg-muted/65 hover:bg-muted px-2 py-1 rounded-md transition-colors"
+                  >
+                    지우기
+                  </button>
+                )}
+              </div>
+              <Button
+                onClick={() => setAppliedSearchDate(matchSearchDate)}
+                className="bg-neon-blue hover:bg-neon-blue/80 text-primary-foreground font-bold h-10 px-4 shrink-0 transition-all active:scale-95 rounded-xl shadow-md font-sans text-xs"
+              >
+                검색
+              </Button>
+            </div>
+          )}
+
+          {matchFilterType === "class" && (
+            <div className="flex gap-2 max-w-md w-full animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="relative flex-1">
+                <Users className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/75" />
+                <Input
+                  type="text"
+                  placeholder="조회할 학년-반을 입력하세요 (예: 6-1, 6)..."
+                  value={matchSearchGradeClass}
+                  onChange={(e) => setMatchSearchGradeClass(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      setAppliedSearchGradeClass(matchSearchGradeClass);
+                    }
+                  }}
+                  className="pl-10 pr-16 h-10 border-border/50 bg-background/40 hover:bg-background/60 focus:bg-background/80 transition-all font-sans text-xs"
+                />
+                {matchSearchGradeClass && (
+                  <button
+                    onClick={() => {
+                      setMatchSearchGradeClass("");
+                      setAppliedSearchGradeClass("");
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground hover:text-foreground bg-muted/65 hover:bg-muted px-2 py-1 rounded-md transition-colors"
+                  >
+                    지우기
+                  </button>
+                )}
+              </div>
+              <Button
+                onClick={() => setAppliedSearchGradeClass(matchSearchGradeClass)}
+                className="bg-neon-blue hover:bg-neon-blue/80 text-primary-foreground font-bold h-10 px-4 shrink-0 transition-all active:scale-95 rounded-xl shadow-md font-sans text-xs"
+              >
+                검색
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Matches table container with horizontal scroll for smaller screens / tablets */}
+        <div className="overflow-x-auto rounded-xl border border-border/30 bg-muted/5">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/30">
+              <tr>
+                <th className="px-4 py-3">경기 일시</th>
+                <th className="px-4 py-3">대결 학생 A</th>
+                <th className="px-4 py-3 text-center">점수</th>
+                <th className="px-4 py-3">대결 학생 B</th>
+                <th className="px-4 py-3">RP 및 획득 보상 변동 내역</th>
+                <th className="px-4 py-3 text-right">관리 작업</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredMatches && filteredMatches.length > 0 ? (
+                filteredMatches.map((m) => {
+                    const playerA = students.find((s) => s.id === m.playerAId) ?? {
+                      name: "알 수 없는 학생",
+                      grade: 0,
+                      classNum: 0,
+                      number: 0,
+                      gender: "U" as Gender
+                    };
+                    const playerB = students.find((s) => s.id === m.playerBId) ?? {
+                      name: "알 수 없는 학생",
+                      grade: 0,
+                      classNum: 0,
+                      number: 0,
+                      gender: "U" as Gender
+                    };
+
+                    const aWon = m.scoreA > m.scoreB;
+                    const matchDateStr = new Date(m.date).toLocaleString("ko-KR", {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit"
+                    });
+
+                    // Gather individual bonuses to display as premium badges
+                    const bonusesA = [];
+                    if (m.rivalBonusA && m.rivalBonusA > 0) bonusesA.push("⚔️ 라이벌 (+5)");
+                    if (m.firstWinBonusA && m.firstWinBonusA > 0) bonusesA.push("🌟 첫승 (+15)");
+                    if (m.revengeBonusA && m.revengeBonusA > 0) bonusesA.push("😈 복수 (+10)");
+                    if (m.underdogBonusA && m.underdogBonusA > 0) bonusesA.push(`🛡️ 언더독 (+${m.underdogBonusA})`);
+                    if (m.scoreDiffBonusA && m.scoreDiffBonusA > 0) bonusesA.push(`🔥 압승 (+${m.scoreDiffBonusA})`);
+
+                    const bonusesB = [];
+                    if (m.rivalBonusB && m.rivalBonusB > 0) bonusesB.push("⚔️ 라이벌 (+5)");
+                    if (m.firstWinBonusB && m.firstWinBonusB > 0) bonusesB.push("🌟 첫승 (+15)");
+                    if (m.revengeBonusB && m.revengeBonusB > 0) bonusesB.push("😈 복수 (+10)");
+                    if (m.underdogBonusB && m.underdogBonusB > 0) bonusesB.push(`🛡️ 언더독 (+${m.underdogBonusB})`);
+                    if (m.scoreDiffBonusB && m.scoreDiffBonusB > 0) bonusesB.push(`🔥 압승 (+${m.scoreDiffBonusB})`);
+
+                    return (
+                      <tr key={m.id} className="border-b border-border/20 hover:bg-accent/10 transition-colors">
+                        {/* 1. Date */}
+                        <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{matchDateStr}</td>
+                        
+                        {/* 2. Player A */}
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <GenderMark gender={playerA.gender} className="size-3.5 text-[9px]" />
+                            <span className={cn("font-bold", aWon && "text-neon-blue")}>{playerA.name}</span>
+                            <span className="text-[10px] text-muted-foreground">({playerA.grade}-{playerA.classNum})</span>
+                          </div>
+                        </td>
+
+                        {/* 3. Score */}
+                        <td className="px-4 py-3 text-center whitespace-nowrap">
+                          <span className="font-mono font-bold bg-muted/60 px-2.5 py-1 rounded text-sm select-none">
+                            <span className={cn(aWon ? "text-win" : "text-loss")}>{m.scoreA}</span>
+                            <span className="text-muted-foreground mx-1">:</span>
+                            <span className={cn(!aWon ? "text-win" : "text-loss")}>{m.scoreB}</span>
+                          </span>
+                        </td>
+
+                        {/* 4. Player B */}
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <GenderMark gender={playerB.gender} className="size-3.5 text-[9px]" />
+                            <span className={cn("font-bold", !aWon && "text-neon-blue")}>{playerB.name}</span>
+                            <span className="text-[10px] text-muted-foreground">({playerB.grade}-{playerB.classNum})</span>
+                          </div>
+                        </td>
+
+                        {/* 5. RP Deltas and Audited Bonuses */}
+                        <td className="px-4 py-3 max-w-[240px] sm:max-w-xs md:max-w-md lg:max-w-lg">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={cn("font-mono font-bold text-[10px]", aWon ? "text-win" : "text-loss")}>
+                                {playerA.name}: {m.rpDeltaA !== undefined ? (m.rpDeltaA > 0 ? `+${m.rpDeltaA}` : m.rpDeltaA) : 0} RP
+                              </span>
+                              <span className="text-muted-foreground/45 text-[10px]">|</span>
+                              <span className={cn("font-mono font-bold text-[10px]", !aWon ? "text-win" : "text-loss")}>
+                                {playerB.name}: {m.rpDeltaB !== undefined ? (m.rpDeltaB > 0 ? `+${m.rpDeltaB}` : m.rpDeltaB) : 0} RP
+                              </span>
+                            </div>
+
+                            {/* Render visual badges for bonuses A */}
+                            {bonusesA.length > 0 && (
+                              <div className="flex items-center gap-1 flex-wrap mt-1">
+                                <span className="text-[9px] text-muted-foreground font-semibold shrink-0">{playerA.name} 보상:</span>
+                                {bonusesA.map((b, idx) => (
+                                  <span key={idx} className="bg-neon-blue/10 text-neon-blue border border-neon-blue/20 text-[8px] font-bold px-1.5 py-0.5 rounded">
+                                    {b}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Render visual badges for bonuses B */}
+                            {bonusesB.length > 0 && (
+                              <div className="flex items-center gap-1 flex-wrap mt-1">
+                                <span className="text-[9px] text-muted-foreground font-semibold shrink-0">{playerB.name} 보상:</span>
+                                {bonusesB.map((b, idx) => (
+                                  <span key={idx} className="bg-neon-blue/10 text-neon-blue border border-neon-blue/20 text-[8px] font-bold px-1.5 py-0.5 rounded">
+                                    {b}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* 6. Tablet Actions panel */}
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Score Edit Button */}
+                            <Button
+                              onClick={() => {
+                                setEditingMatchId(m.id);
+                                setEditScoreA(m.scoreA.toString());
+                                setEditScoreB(m.scoreB.toString());
+                              }}
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2.5 rounded-lg border-border/80 text-foreground hover:bg-accent/40 active:scale-95 transition-all text-[11px] font-bold"
+                              title="경기 점수 수정"
+                            >
+                              <Pencil className="size-3.5 mr-1" /> 수정
+                            </Button>
+
+                            {/* Record Delete & RP Rollback Button */}
+                            <Button
+                              onClick={() => {
+                                const deltaWinner = aWon ? (m.rpDeltaA !== undefined ? Math.abs(m.rpDeltaA) : 25) : (m.rpDeltaB !== undefined ? Math.abs(m.rpDeltaB) : 25);
+                                const deltaLoser = !aWon ? (m.rpDeltaA !== undefined ? Math.abs(m.rpDeltaA) : 20) : (m.rpDeltaB !== undefined ? Math.abs(m.rpDeltaB) : 20);
+
+                                if (window.confirm(`정말로 이 경기 기록(VS ${playerB.name})을 삭제하시겠습니까?\n\n두 학생의 RP가 경기 이전 상태로 완벽하게 롤백 복원됩니다.\n- ${playerA.name}: RP ${aWon ? "-" : "+"}${deltaWinner}\n- ${playerB.name}: RP ${!aWon ? "-" : "+"}${deltaLoser}`)) {
+                                  onDeleteMatch(m.id);
+                                  toast.success("경기 기록이 완벽히 삭제되었으며 두 학생의 RP 및 전적이 경기 이전으로 롤백 복구되었습니다!");
+                                }
+                              }}
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg active:scale-95 transition-all shrink-0"
+                              title="이 경기 삭제 및 안전 롤백"
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+              ) : (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-muted-foreground font-medium bg-muted/5 font-sans text-xs">
+                    {(() => {
+                      if (matchFilterType === "recent") {
+                        return "기록된 전체 경기 매치 내역이 전혀 존재하지 않습니다.";
+                      }
+                      
+                      const hasApplied = 
+                        (matchFilterType === "student" && appliedSearchStudent) ||
+                        (matchFilterType === "date" && appliedSearchDate) ||
+                        (matchFilterType === "class" && appliedSearchGradeClass);
+                        
+                      if (!hasApplied) {
+                        return "검색어를 입력하고 '검색' 버튼(또는 엔터)을 누르면 매치 기록을 불러옵니다.";
+                      }
+                      
+                      return "선택한 필터 조건과 일치하는 경기 기록이 존재하지 않습니다.";
+                    })()}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
       {/* 1. Class Control: Lock Switch */}
       <Card className={cn(
         "border transition-all duration-300 p-5 backdrop-blur shadow-lg relative overflow-hidden",
@@ -1375,336 +1783,7 @@ export function AdminPanel({
         </div>
       </Card>
 
-      {/* 3.9. All Match Records Integrated Management Section (전체 경기 기록 통합 관리) */}
-      <Card className="border border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl relative overflow-hidden">
-        <div className="mb-4">
-          <div className="flex items-center gap-2 text-neon-blue">
-            <Swords className="size-5" />
-            <h3 className="font-black text-lg">전체 경기 기록 통합 관리</h3>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            리그에 기록된 모든 매치 데이터를 조회하고, 경기 점수를 소급 수정하거나 완전 삭제하여 RP 및 전적을 안전하게 롤백 복원합니다. (태블릿 환경 최적화)
-          </p>
-        </div>
-
-        {/* Category Selector Tabs & Inputs for Dynamic Loading/Filtering */}
-        <div className="mb-5 space-y-3">
-          <div className="p-1 bg-muted/40 border border-border/20 rounded-xl flex flex-wrap gap-1.5 w-full md:w-max">
-            <button
-              onClick={() => {
-                setMatchFilterType("recent");
-                setMatchSearchStudent("");
-                setMatchSearchDate("");
-                setMatchSearchGradeClass("");
-              }}
-              className={cn(
-                "px-3.5 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 transition-all active:scale-95",
-                matchFilterType === "recent"
-                  ? "bg-neon-blue/15 text-neon-blue border border-neon-blue/35 shadow-sm shadow-neon-blue/10"
-                  : "text-muted-foreground hover:text-foreground border border-transparent hover:bg-muted/50"
-              )}
-            >
-              <Swords className="size-3.5" />
-              최근 20경기
-            </button>
-            <button
-              onClick={() => {
-                setMatchFilterType("student");
-                setMatchSearchStudent("");
-                setMatchSearchDate("");
-                setMatchSearchGradeClass("");
-              }}
-              className={cn(
-                "px-3.5 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 transition-all active:scale-95",
-                matchFilterType === "student"
-                  ? "bg-neon-blue/15 text-neon-blue border border-neon-blue/35 shadow-sm shadow-neon-blue/10"
-                  : "text-muted-foreground hover:text-foreground border border-transparent hover:bg-muted/50"
-              )}
-            >
-              <Search className="size-3.5" />
-              학생 이름 검색
-            </button>
-            <button
-              onClick={() => {
-                setMatchFilterType("date");
-                setMatchSearchStudent("");
-                setMatchSearchDate("");
-                setMatchSearchGradeClass("");
-              }}
-              className={cn(
-                "px-3.5 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 transition-all active:scale-95",
-                matchFilterType === "date"
-                  ? "bg-neon-blue/15 text-neon-blue border border-neon-blue/35 shadow-sm shadow-neon-blue/10"
-                  : "text-muted-foreground hover:text-foreground border border-transparent hover:bg-muted/50"
-              )}
-            >
-              <Calendar className="size-3.5" />
-              날짜 검색 (6/2 등)
-            </button>
-            <button
-              onClick={() => {
-                setMatchFilterType("class");
-                setMatchSearchStudent("");
-                setMatchSearchDate("");
-                setMatchSearchGradeClass("");
-              }}
-              className={cn(
-                "px-3.5 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 transition-all active:scale-95",
-                matchFilterType === "class"
-                  ? "bg-neon-blue/15 text-neon-blue border border-neon-blue/35 shadow-sm shadow-neon-blue/10"
-                  : "text-muted-foreground hover:text-foreground border border-transparent hover:bg-muted/50"
-              )}
-            >
-              <Users className="size-3.5" />
-              학년·반 검색 (6-1 등)
-            </button>
-          </div>
-
-          {/* Conditional search inputs with premium glass style */}
-          {matchFilterType === "student" && (
-            <div className="relative max-w-md w-full animate-in fade-in slide-in-from-top-1 duration-200">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/75" />
-              <Input
-                type="text"
-                placeholder="조회할 학생 이름을 입력하세요..."
-                value={matchSearchStudent}
-                onChange={(e) => setMatchSearchStudent(e.target.value)}
-                className="pl-10 pr-16 h-10 border-border/50 bg-background/40 hover:bg-background/60 focus:bg-background/80 transition-all font-sans text-xs"
-              />
-              {matchSearchStudent && (
-                <button
-                  onClick={() => setMatchSearchStudent("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground hover:text-foreground bg-muted/65 hover:bg-muted px-2 py-1 rounded-md transition-colors"
-                >
-                  지우기
-                </button>
-              )}
-            </div>
-          )}
-
-          {matchFilterType === "date" && (
-            <div className="relative max-w-md w-full animate-in fade-in slide-in-from-top-1 duration-200">
-              <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/75" />
-              <Input
-                type="text"
-                placeholder="조회할 날짜를 입력하세요 (예: 6/2, 6월 2일)..."
-                value={matchSearchDate}
-                onChange={(e) => setMatchSearchDate(e.target.value)}
-                className="pl-10 pr-16 h-10 border-border/50 bg-background/40 hover:bg-background/60 focus:bg-background/80 transition-all font-sans text-xs"
-              />
-              {matchSearchDate && (
-                <button
-                  onClick={() => setMatchSearchDate("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground hover:text-foreground bg-muted/65 hover:bg-muted px-2 py-1 rounded-md transition-colors"
-                >
-                  지우기
-                </button>
-              )}
-            </div>
-          )}
-
-          {matchFilterType === "class" && (
-            <div className="relative max-w-md w-full animate-in fade-in slide-in-from-top-1 duration-200">
-              <Users className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/75" />
-              <Input
-                type="text"
-                placeholder="조회할 학년-반을 입력하세요 (예: 6-1, 6)..."
-                value={matchSearchGradeClass}
-                onChange={(e) => setMatchSearchGradeClass(e.target.value)}
-                className="pl-10 pr-16 h-10 border-border/50 bg-background/40 hover:bg-background/60 focus:bg-background/80 transition-all font-sans text-xs"
-              />
-              {matchSearchGradeClass && (
-                <button
-                  onClick={() => setMatchSearchGradeClass("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground hover:text-foreground bg-muted/65 hover:bg-muted px-2 py-1 rounded-md transition-colors"
-                >
-                  지우기
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Matches table container with horizontal scroll for smaller screens / tablets */}
-        <div className="overflow-x-auto rounded-xl border border-border/30 bg-muted/5">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/30">
-              <tr>
-                <th className="px-4 py-3">경기 일시</th>
-                <th className="px-4 py-3">대결 학생 A</th>
-                <th className="px-4 py-3 text-center">점수</th>
-                <th className="px-4 py-3">대결 학생 B</th>
-                <th className="px-4 py-3">RP 및 획득 보상 변동 내역</th>
-                <th className="px-4 py-3 text-right">관리 작업</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredMatches && filteredMatches.length > 0 ? (
-                filteredMatches.map((m) => {
-                    const playerA = students.find((s) => s.id === m.playerAId) ?? {
-                      name: "알 수 없는 학생",
-                      grade: 0,
-                      classNum: 0,
-                      number: 0,
-                      gender: "U" as Gender
-                    };
-                    const playerB = students.find((s) => s.id === m.playerBId) ?? {
-                      name: "알 수 없는 학생",
-                      grade: 0,
-                      classNum: 0,
-                      number: 0,
-                      gender: "U" as Gender
-                    };
-
-                    const aWon = m.scoreA > m.scoreB;
-                    const matchDateStr = new Date(m.date).toLocaleString("ko-KR", {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit"
-                    });
-
-                    // Gather individual bonuses to display as premium badges
-                    const bonusesA = [];
-                    if (m.rivalBonusA && m.rivalBonusA > 0) bonusesA.push("⚔️ 라이벌 (+5)");
-                    if (m.firstWinBonusA && m.firstWinBonusA > 0) bonusesA.push("🌟 첫승 (+15)");
-                    if (m.revengeBonusA && m.revengeBonusA > 0) bonusesA.push("😈 복수 (+10)");
-                    if (m.underdogBonusA && m.underdogBonusA > 0) bonusesA.push(`🛡️ 언더독 (+${m.underdogBonusA})`);
-                    if (m.scoreDiffBonusA && m.scoreDiffBonusA > 0) bonusesA.push(`🔥 압승 (+${m.scoreDiffBonusA})`);
-
-                    const bonusesB = [];
-                    if (m.rivalBonusB && m.rivalBonusB > 0) bonusesB.push("⚔️ 라이벌 (+5)");
-                    if (m.firstWinBonusB && m.firstWinBonusB > 0) bonusesB.push("🌟 첫승 (+15)");
-                    if (m.revengeBonusB && m.revengeBonusB > 0) bonusesB.push("😈 복수 (+10)");
-                    if (m.underdogBonusB && m.underdogBonusB > 0) bonusesB.push(`🛡️ 언더독 (+${m.underdogBonusB})`);
-                    if (m.scoreDiffBonusB && m.scoreDiffBonusB > 0) bonusesB.push(`🔥 압승 (+${m.scoreDiffBonusB})`);
-
-                    return (
-                      <tr key={m.id} className="border-b border-border/20 hover:bg-accent/10 transition-colors">
-                        {/* 1. Date */}
-                        <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{matchDateStr}</td>
-                        
-                        {/* 2. Player A */}
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <GenderMark gender={playerA.gender} className="size-3.5 text-[9px]" />
-                            <span className={cn("font-bold", aWon && "text-neon-blue")}>{playerA.name}</span>
-                            <span className="text-[10px] text-muted-foreground">({playerA.grade}-{playerA.classNum})</span>
-                          </div>
-                        </td>
-
-                        {/* 3. Score */}
-                        <td className="px-4 py-3 text-center whitespace-nowrap">
-                          <span className="font-mono font-bold bg-muted/60 px-2.5 py-1 rounded text-sm select-none">
-                            <span className={cn(aWon ? "text-win" : "text-loss")}>{m.scoreA}</span>
-                            <span className="text-muted-foreground mx-1">:</span>
-                            <span className={cn(!aWon ? "text-win" : "text-loss")}>{m.scoreB}</span>
-                          </span>
-                        </td>
-
-                        {/* 4. Player B */}
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <GenderMark gender={playerB.gender} className="size-3.5 text-[9px]" />
-                            <span className={cn("font-bold", !aWon && "text-neon-blue")}>{playerB.name}</span>
-                            <span className="text-[10px] text-muted-foreground">({playerB.grade}-{playerB.classNum})</span>
-                          </div>
-                        </td>
-
-                        {/* 5. RP Deltas and Audited Bonuses */}
-                        <td className="px-4 py-3 max-w-[240px] sm:max-w-xs md:max-w-md lg:max-w-lg">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={cn("font-mono font-bold text-[10px]", aWon ? "text-win" : "text-loss")}>
-                                {playerA.name}: {m.rpDeltaA !== undefined ? (m.rpDeltaA > 0 ? `+${m.rpDeltaA}` : m.rpDeltaA) : 0} RP
-                              </span>
-                              <span className="text-muted-foreground/45 text-[10px]">|</span>
-                              <span className={cn("font-mono font-bold text-[10px]", !aWon ? "text-win" : "text-loss")}>
-                                {playerB.name}: {m.rpDeltaB !== undefined ? (m.rpDeltaB > 0 ? `+${m.rpDeltaB}` : m.rpDeltaB) : 0} RP
-                              </span>
-                            </div>
-
-                            {/* Render visual badges for bonuses A */}
-                            {bonusesA.length > 0 && (
-                              <div className="flex items-center gap-1 flex-wrap mt-1">
-                                <span className="text-[9px] text-muted-foreground font-semibold shrink-0">{playerA.name} 보상:</span>
-                                {bonusesA.map((b, idx) => (
-                                  <span key={idx} className="bg-neon-blue/10 text-neon-blue border border-neon-blue/20 text-[8px] font-bold px-1.5 py-0.5 rounded">
-                                    {b}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Render visual badges for bonuses B */}
-                            {bonusesB.length > 0 && (
-                              <div className="flex items-center gap-1 flex-wrap mt-1">
-                                <span className="text-[9px] text-muted-foreground font-semibold shrink-0">{playerB.name} 보상:</span>
-                                {bonusesB.map((b, idx) => (
-                                  <span key={idx} className="bg-neon-blue/10 text-neon-blue border border-neon-blue/20 text-[8px] font-bold px-1.5 py-0.5 rounded">
-                                    {b}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* 6. Tablet Actions panel */}
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {/* Score Edit Button */}
-                            <Button
-                              onClick={() => {
-                                setEditingMatchId(m.id);
-                                setEditScoreA(m.scoreA.toString());
-                                setEditScoreB(m.scoreB.toString());
-                              }}
-                              variant="outline"
-                              size="sm"
-                              className="h-8 px-2.5 rounded-lg border-border/80 text-foreground hover:bg-accent/40 active:scale-95 transition-all text-[11px] font-bold"
-                              title="경기 점수 수정"
-                            >
-                              <Pencil className="size-3.5 mr-1" /> 수정
-                            </Button>
-
-                            {/* Record Delete & RP Rollback Button */}
-                            <Button
-                              onClick={() => {
-                                const deltaWinner = aWon ? (m.rpDeltaA !== undefined ? Math.abs(m.rpDeltaA) : 25) : (m.rpDeltaB !== undefined ? Math.abs(m.rpDeltaB) : 25);
-                                const deltaLoser = !aWon ? (m.rpDeltaA !== undefined ? Math.abs(m.rpDeltaA) : 20) : (m.rpDeltaB !== undefined ? Math.abs(m.rpDeltaB) : 20);
-
-                                if (window.confirm(`정말로 이 경기 기록(VS ${playerB.name})을 삭제하시겠습니까?\n\n두 학생의 RP가 경기 이전 상태로 완벽하게 롤백 복원됩니다.\n- ${playerA.name}: RP ${aWon ? "-" : "+"}${deltaWinner}\n- ${playerB.name}: RP ${!aWon ? "-" : "+"}${deltaLoser}`)) {
-                                  onDeleteMatch(m.id);
-                                  toast.success("경기 기록이 완벽히 삭제되었으며 두 학생의 RP 및 전적이 경기 이전으로 롤백 복구되었습니다!");
-                                }
-                              }}
-                              variant="ghost"
-                              size="icon"
-                              className="size-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg active:scale-95 transition-all shrink-0"
-                              title="이 경기 삭제 및 안전 롤백"
-                            >
-                              <Trash2 className="size-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-              ) : (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-muted-foreground font-medium bg-muted/5">
-                    {matches && matches.length > 0
-                      ? "선택한 필터 조건과 일치하는 경기 기록이 존재하지 않습니다."
-                      : "기록된 전체 경기 매치 내역이 전혀 존재하지 않습니다."}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
+      {/* 전체 경기 기록 통합 관리 섹션이 최상단으로 이동되었습니다. */}
       {/* Inline Score Edit Modal Overlaid (Radix Dialog style custom state overlay) */}
       {editingMatchId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
