@@ -72,6 +72,12 @@ export function useLeagueStore() {
   // 3대 역할 로그인 세션 상태
   const [session, setSession] = useState<UserSession>(null);
 
+  // 이중 보안 모달을 위한 선생님 비밀번호(접근 코드) 전역 관리
+  const [teacherAccessCode, setTeacherAccessCode] = useState<string>(() => {
+    if (typeof window === "undefined") return "1234";
+    return localStorage.getItem("bdm.teacherAccessCode.v1") || "1234";
+  });
+
   // 리그전 커스텀 설정 상태 추가
   const [tierThresholds, setTierThresholds] = useState<Record<TierName, number>>({
     Bronze: 0,
@@ -154,6 +160,8 @@ export function useLeagueStore() {
         };
         setSession(targetSession);
         saveJSON(SESSION_KEY, targetSession);
+        setTeacherAccessCode(cleanedCode);
+        localStorage.setItem("bdm.teacherAccessCode.v1", cleanedCode);
 
         // 구글 시트에서 즉시 전적 데이터 끌어오기 (Hydration)
         try {
@@ -246,6 +254,10 @@ export function useLeagueStore() {
       if (data.status === "success" && data.user) {
         setSession(data.user);
         saveJSON(SESSION_KEY, data.user);
+        if (role === "TEACHER" || role === "MASTER") {
+          setTeacherAccessCode(cleanedCode);
+          localStorage.setItem("bdm.teacherAccessCode.v1", cleanedCode);
+        }
         
         if (data.user.scriptUrl) {
           try {
@@ -278,6 +290,8 @@ export function useLeagueStore() {
           };
           setSession(teacherSession);
           saveJSON(SESSION_KEY, teacherSession);
+          setTeacherAccessCode(cleanedCode);
+          localStorage.setItem("bdm.teacherAccessCode.v1", cleanedCode);
           
           const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
           if (!localStudents || localStudents.length === 0) {
@@ -323,6 +337,8 @@ export function useLeagueStore() {
           };
           setSession(teacherSession);
           saveJSON(SESSION_KEY, teacherSession);
+          setTeacherAccessCode(cleanedCode);
+          localStorage.setItem("bdm.teacherAccessCode.v1", cleanedCode);
           return { success: true };
         } else {
           return { success: false, message: "교사 인증코드가 오프라인 상태에서 일치하지 않습니다. (기본 코드: 1234)" };
@@ -398,6 +414,8 @@ export function useLeagueStore() {
     setMatches([]);
     saveJSON(STUDENTS_KEY, SEED_STUDENTS);
     saveJSON(MATCHES_KEY, []);
+    setTeacherAccessCode("1234");
+    localStorage.removeItem("bdm.teacherAccessCode.v1");
   }, []);
 
   // 5. 초기 기동 시 세션 및 로컬 데이터 Hydration
@@ -957,6 +975,7 @@ export function useLeagueStore() {
     updateStudentGender,
     deleteStudent,
     restoreFromCSV,
-    bulkDecayRP
+    bulkDecayRP,
+    teacherAccessCode
   };
 }

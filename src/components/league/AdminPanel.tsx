@@ -23,6 +23,7 @@ import { GenderMark } from "./GenderMark";
 import { TierBadge } from "./TierBadge";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
+import { SecurityModal } from "./SecurityModal";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -88,6 +89,7 @@ export function AdminPanel({
   onDeleteStudent,
   onRestoreFromCSV,
   onBulkDecay,
+  teacherAccessCode,
 }: {
   students: Student[];
   matches: Match[];
@@ -105,11 +107,32 @@ export function AdminPanel({
   onDeleteStudent?: (studentId: string) => void;
   onRestoreFromCSV?: (students: Student[], matches: Match[]) => void;
   onBulkDecay?: (inactiveDays: number, decayAmount: number) => number;
+  teacherAccessCode: string;
 }) {
   // CSV 롤백 복원 상태
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [pendingRestoreData, setPendingRestoreData] = useState<Student[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 이중 보안 상태 및 자동 잠금 훅
+  const [isUnlocked, setIsUnlocked] = useState(false);
+
+  useEffect(() => {
+    setIsUnlocked(false);
+    return () => {
+      setIsUnlocked(false);
+    };
+  }, []);
+
+  // 보안 잠금 가드 렌더링
+  if (!isUnlocked) {
+    return (
+      <SecurityModal
+        correctCode={teacherAccessCode}
+        onSuccess={() => setIsUnlocked(true)}
+      />
+    );
+  }
 
   // Bulk upload states
   const [text, setText] = useState("");

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { SecurityModal } from "./SecurityModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,12 +21,40 @@ function getWinStreak(recent: ("W" | "L")[]): number {
   return count;
 }
 
-export function Leaderboard({ students, thresholds }: { students: Student[]; thresholds?: Record<TierName, number> }) {
+export function Leaderboard({ 
+  students, 
+  thresholds, 
+  teacherAccessCode 
+}: { 
+  students: Student[]; 
+  thresholds?: Record<TierName, number>;
+  teacherAccessCode: string;
+}) {
   const [grade, setGrade] = useState<number | "all">("all");
   const [classNum, setClassNum] = useState<number | "all">("all");
   const [tier, setTier] = useState<TierName | "all">("all");
   const [gender, setGender] = useState<GenderFilter>("all");
   const [query, setQuery] = useState("");
+
+  // 이중 보안 상태 및 자동 잠금 훅
+  const [isUnlocked, setIsUnlocked] = useState(false);
+
+  useEffect(() => {
+    setIsUnlocked(false);
+    return () => {
+      setIsUnlocked(false);
+    };
+  }, []);
+
+  // 보안 잠금 가드 렌더링
+  if (!isUnlocked) {
+    return (
+      <SecurityModal
+        correctCode={teacherAccessCode}
+        onSuccess={() => setIsUnlocked(true)}
+      />
+    );
+  }
 
   const availableClasses = useMemo(() => {
     if (grade === "all") return [];

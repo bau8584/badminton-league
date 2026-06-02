@@ -52,7 +52,8 @@ function Index() {
     updateStudentGender,
     deleteStudent,
     restoreFromCSV,
-    bulkDecayRP
+    bulkDecayRP,
+    teacherAccessCode
   } = useLeagueStore();
 
   const [tab, setTab] = useState<Tab>("leaderboard");
@@ -287,7 +288,13 @@ function Index() {
         {/* Tenant Panels */}
         {session.role !== "MASTER" && (
           <>
-            {tab === "leaderboard" && session.role !== "STUDENT" && <Leaderboard students={students} thresholds={tierThresholds} />}
+            {tab === "leaderboard" && session.role !== "STUDENT" && (
+              <Leaderboard 
+                students={students} 
+                thresholds={tierThresholds} 
+                teacherAccessCode={teacherAccessCode} 
+              />
+            )}
             
             {tab === "recommend" && (
               <MatchRecommend
@@ -349,6 +356,7 @@ function Index() {
                 onDeleteStudent={deleteStudent}
                 onRestoreFromCSV={restoreFromCSV}
                 onBulkDecay={bulkDecayRP}
+                teacherAccessCode={teacherAccessCode}
               />
             )}
           </>
