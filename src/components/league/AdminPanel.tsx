@@ -124,15 +124,7 @@ export function AdminPanel({
     };
   }, []);
 
-  // 보안 잠금 가드 렌더링
-  if (!isUnlocked) {
-    return (
-      <SecurityModal
-        correctCode={teacherAccessCode}
-        onSuccess={() => setIsUnlocked(true)}
-      />
-    );
-  }
+
 
   // Bulk upload states
   const [text, setText] = useState("");
@@ -457,6 +449,16 @@ export function AdminPanel({
       toast.success(`${selectedStudent.name} 학생의 기록을 완전 초기화했습니다.`);
     }
   };
+
+  // 보안 잠금 가드 렌더링
+  if (!isUnlocked) {
+    return (
+      <SecurityModal
+        correctCode={teacherAccessCode}
+        onSuccess={() => setIsUnlocked(true)}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">

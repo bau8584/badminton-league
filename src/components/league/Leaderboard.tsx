@@ -46,15 +46,7 @@ export function Leaderboard({
     };
   }, []);
 
-  // 보안 잠금 가드 렌더링
-  if (!isUnlocked) {
-    return (
-      <SecurityModal
-        correctCode={teacherAccessCode}
-        onSuccess={() => setIsUnlocked(true)}
-      />
-    );
-  }
+
 
   const availableClasses = useMemo(() => {
     if (grade === "all") return [];
@@ -73,6 +65,16 @@ export function Leaderboard({
       .filter((s) => (q ? s.name.toLowerCase().includes(q) : true))
       .sort((a, b) => b.rp - a.rp);
   }, [students, grade, classNum, tier, gender, query, thresholds]);
+
+  // 보안 잠금 가드 렌더링
+  if (!isUnlocked) {
+    return (
+      <SecurityModal
+        correctCode={teacherAccessCode}
+        onSuccess={() => setIsUnlocked(true)}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">
