@@ -43,7 +43,7 @@ export function LoginPanel({
   }) => Promise<{ success: boolean; message?: string }>;
   isSyncing: boolean;
 }) {
-  const [activeTab, setActiveTab] = useState<"TEACHER" | "STUDENT">("TEACHER");
+  const [activeTab, setActiveTab] = useState<"TEACHER" | "STUDENT">("STUDENT");
   const [isMasterMode, setIsMasterMode] = useState(false);
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   
@@ -207,18 +207,6 @@ export function LoginPanel({
           <div className="grid grid-cols-2 gap-2 bg-background/50 border border-border/40 p-1.5 rounded-xl mb-6 relative z-10">
             <button
               type="button"
-              onClick={() => setActiveTab("TEACHER")}
-              className={cn(
-                "flex items-center justify-center gap-1.5 py-2 px-1.5 rounded-lg text-xs font-extrabold transition-all active:scale-[0.97]",
-                activeTab === "TEACHER"
-                  ? "bg-gradient-to-r from-neon-blue to-tier-diamond text-primary-foreground shadow-[0_0_12px_rgba(0,180,216,0.3)]"
-                  : "text-muted-foreground hover:text-foreground hover:bg-background/40"
-              )}
-            >
-              <Building2 className="size-3.5" /> 교사 접속
-            </button>
-            <button
-              type="button"
               onClick={() => setActiveTab("STUDENT")}
               className={cn(
                 "flex items-center justify-center gap-1.5 py-2 px-1.5 rounded-lg text-xs font-extrabold transition-all active:scale-[0.97]",
@@ -228,6 +216,18 @@ export function LoginPanel({
               )}
             >
               <Users className="size-3.5" /> 학생 접속
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("TEACHER")}
+              className={cn(
+                "flex items-center justify-center gap-1.5 py-2 px-1.5 rounded-lg text-xs font-extrabold transition-all active:scale-[0.97]",
+                activeTab === "TEACHER"
+                  ? "bg-gradient-to-r from-neon-blue to-tier-diamond text-primary-foreground shadow-[0_0_12px_rgba(0,180,216,0.3)]"
+                  : "text-muted-foreground hover:text-foreground hover:bg-background/40"
+              )}
+            >
+              <Building2 className="size-3.5" /> 교사 접속
             </button>
           </div>
         )}
