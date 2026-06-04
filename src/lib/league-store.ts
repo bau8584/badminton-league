@@ -291,7 +291,8 @@ export function useLeagueStore() {
         }
 
         if (activeStudents.length === 0) {
-          activeStudents = loadJSON<Student[]>(STUDENTS_KEY, SEED_STUDENTS);
+          const isGuest = cleanedSchool.toLowerCase() === "guest" || cleanedSchool === "꿈나무 초등학교";
+          activeStudents = loadJSON<Student[]>(STUDENTS_KEY, isGuest ? SEED_STUDENTS : []);
         }
 
         const matchStudent = activeStudents.find((s) => 
@@ -388,23 +389,38 @@ export function useLeagueStore() {
           }
         }
         
+        const isGuest = data.user.loginId === "guest" || data.user.schoolName?.includes("꿈나무");
         if (data.user.scriptUrl) {
           try {
             const remoteRes = await fetch(data.user.scriptUrl);
             const remoteData = await remoteRes.json();
             if (remoteData.status === "success") {
-              if (remoteData.students) {
-                setStudents(remoteData.students);
-                saveJSON(STUDENTS_KEY, remoteData.students);
-              }
-              if (remoteData.matches) {
-                setMatches(remoteData.matches);
-                saveJSON(MATCHES_KEY, remoteData.matches);
-              }
+              const fetchedStudents = remoteData.students || [];
+              setStudents(fetchedStudents);
+              saveJSON(STUDENTS_KEY, fetchedStudents);
+              const fetchedMatches = remoteData.matches || [];
+              setMatches(fetchedMatches);
+              saveJSON(MATCHES_KEY, fetchedMatches);
+            } else {
+              const defaultStudents = isGuest ? SEED_STUDENTS : [];
+              setStudents(defaultStudents);
+              saveJSON(STUDENTS_KEY, defaultStudents);
             }
           } catch (err) {
             console.warn("Could not download remote sheet data upon login. Using cached data:", err);
+            const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
+            const isLocalSeed = localStudents && localStudents.length > 0 && localStudents[0].name === SEED_STUDENTS[0].name;
+            if (!isGuest && isLocalSeed) {
+              setStudents([]);
+              saveJSON(STUDENTS_KEY, []);
+            }
           }
+        } else {
+          const defaultStudents = isGuest ? SEED_STUDENTS : [];
+          setStudents(defaultStudents);
+          saveJSON(STUDENTS_KEY, defaultStudents);
+          setMatches([]);
+          saveJSON(MATCHES_KEY, []);
         }
         return { success: true };
       } else {
@@ -499,29 +515,38 @@ export function useLeagueStore() {
             localStorage.setItem("bdm.teacherAccessCode.v1", cleanedCode);
 
             // 구글 시트 연동 갱신 시도
+            const isGuest = cleanedSchool.toLowerCase() === "guest" || cleanedSchool === "꿈나무 초등학교";
             if (schoolScriptUrl) {
               try {
                 const remoteRes = await fetch(schoolScriptUrl);
                 const remoteData = await remoteRes.json();
                 if (remoteData.status === "success") {
-                  if (remoteData.students) {
-                    setStudents(remoteData.students);
-                    saveJSON(STUDENTS_KEY, remoteData.students);
-                  }
-                  if (remoteData.matches) {
-                    setMatches(remoteData.matches);
-                    saveJSON(MATCHES_KEY, remoteData.matches);
-                  }
+                  const fetchedStudents = remoteData.students || [];
+                  setStudents(fetchedStudents);
+                  saveJSON(STUDENTS_KEY, fetchedStudents);
+                  const fetchedMatches = remoteData.matches || [];
+                  setMatches(fetchedMatches);
+                  saveJSON(MATCHES_KEY, fetchedMatches);
+                } else {
+                  const defaultStudents = isGuest ? SEED_STUDENTS : [];
+                  setStudents(defaultStudents);
+                  saveJSON(STUDENTS_KEY, defaultStudents);
                 }
               } catch (err) {
                 console.warn("Offline loading remote sheet data for school:", err);
+                const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
+                const isLocalSeed = localStudents && localStudents.length > 0 && localStudents[0].name === SEED_STUDENTS[0].name;
+                if (!isGuest && isLocalSeed) {
+                  setStudents([]);
+                  saveJSON(STUDENTS_KEY, []);
+                }
               }
             } else {
-              const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
-              if (!localStudents || localStudents.length === 0) {
-                setStudents(SEED_STUDENTS);
-                saveJSON(STUDENTS_KEY, SEED_STUDENTS);
-              }
+              const defaultStudents = isGuest ? SEED_STUDENTS : [];
+              setStudents(defaultStudents);
+              saveJSON(STUDENTS_KEY, defaultStudents);
+              setMatches([]);
+              saveJSON(MATCHES_KEY, []);
             }
             return { success: true };
           }
@@ -550,7 +575,8 @@ export function useLeagueStore() {
           return { success: false, message: "교사 인증코드가 오프라인 상태에서 일치하지 않습니다." };
         }
       } else if (role === "STUDENT") {
-        const activeStudents = students.length > 0 ? students : loadJSON<Student[]>(STUDENTS_KEY, SEED_STUDENTS);
+        const isGuest = cleanedSchool.toLowerCase() === "guest" || cleanedSchool === "꿈나무 초등학교";
+        const activeStudents = students.length > 0 ? students : loadJSON<Student[]>(STUDENTS_KEY, isGuest ? SEED_STUDENTS : []);
         const matchStudent = activeStudents.find((s) => 
           s.name === cleanedCode &&
           (studentGrade === undefined || s.grade === studentGrade) &&
@@ -667,7 +693,19 @@ export function useLeagueStore() {
       const localTitle = loadJSON<string>(TITLE_KEY, "2026 초등 리그전");
       const localLocked = loadJSON<boolean>(LOCKED_KEY, false);
 
-      const activeStudents = localStudents !== null ? localStudents : SEED_STUDENTS;
+      const isGuest = cachedSession?.loginId === "guest" || cachedSession?.schoolName?.includes("꿈나무");
+      let activeStudents = localStudents !== null ? localStudents : SEED_STUDENTS;
+      
+      // If it is a real school session, but the local data is currently the SEED_STUDENTS (from a previous logout or guest state),
+      // we must reset it to an empty list to avoid displaying the demo students in the new school.
+      if (cachedSession && !isGuest) {
+        const isLocalSeed = activeStudents.length > 0 && activeStudents[0].name === SEED_STUDENTS[0].name;
+        if (isLocalSeed) {
+          activeStudents = [];
+          saveJSON(STUDENTS_KEY, []);
+        }
+      }
+
       setStudents(activeStudents);
       setMatches(localMatches);
       setTitle(localTitle);
