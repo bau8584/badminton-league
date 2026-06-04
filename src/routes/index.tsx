@@ -47,6 +47,7 @@ function Index() {
     loginUser,
     registerUser,
     logoutUser,
+    recoverPassword,
     MASTER_API_URL,
     tierThresholds,
     rpVariables,
@@ -126,6 +127,7 @@ function Index() {
         <LoginPanel
           onLogin={loginUser}
           onRegister={registerUser}
+          onRecoverPassword={recoverPassword}
           isSyncing={isSyncing}
         />
       </div>

@@ -24,6 +24,7 @@ type Role = "TEACHER" | "STUDENT" | "MASTER";
 export function LoginPanel({
   onLogin,
   onRegister,
+  onRecoverPassword,
   isSyncing
 }: {
   onLogin: (
@@ -40,7 +41,9 @@ export function LoginPanel({
     schoolName: string;
     userName: string;
     scriptUrl?: string;
+    email?: string;
   }) => Promise<{ success: boolean; message?: string }>;
+  onRecoverPassword: (schoolName: string, email: string) => Promise<{ success: boolean; message?: string }>;
   isSyncing: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<"TEACHER" | "STUDENT">("STUDENT");
@@ -63,6 +66,31 @@ export function LoginPanel({
   const [regAccessCode, setRegAccessCode] = useState("");
   const [regAccessCodeConfirm, setRegAccessCodeConfirm] = useState("");
   const [regScriptUrl, setRegScriptUrl] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+
+  // Recover Password Inputs
+  const [isRecoverModalOpen, setIsRecoverModalOpen] = useState(false);
+  const [recoverSchoolName, setRecoverSchoolName] = useState("");
+  const [recoverEmail, setRecoverEmail] = useState("");
+
+  const handleRecoverSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!recoverSchoolName.trim()) return toast.error("학교 이름을 입력해 주세요.");
+    if (!recoverEmail.trim()) return toast.error("이메일 주소를 입력해 주세요.");
+
+    toast.loading("비밀번호 자가 복구 요청 중...", { id: "recover-loading" });
+    const res = await onRecoverPassword(recoverSchoolName.trim(), recoverEmail.trim());
+    toast.dismiss("recover-loading");
+
+    if (res.success) {
+      toast.success(res.message || "비밀번호가 등록된 이메일 주소로 자동 발송되었습니다.");
+      setIsRecoverModalOpen(false);
+      setRecoverSchoolName("");
+      setRecoverEmail("");
+    } else {
+      toast.error(res.message || "비밀번호 찾기 요청 실패. 입력한 정보를 다시 확인해 주세요.");
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,6 +114,7 @@ export function LoginPanel({
       if (!regSchoolName.trim()) return toast.error("등록할 학교 이름을 입력해 주세요.");
       if (!regAccessCode.trim()) return toast.error("접속 시 사용할 4~10자리 인증코드를 지정해 주세요.");
       if (regAccessCode !== regAccessCodeConfirm) return toast.error("지정한 두 인증코드가 일치하지 않습니다.");
+      if (!regEmail.trim()) return toast.error("비밀번호 분실 시 수신할 이메일 주소를 입력해 주세요.");
 
       toast.loading("마스터 서버에 새로운 리그 학교 정보를 등록하는 중...", { id: "reg-loading" });
       const res = await onRegister({
@@ -94,7 +123,8 @@ export function LoginPanel({
         role: "TEACHER",
         schoolName: regSchoolName.trim(),
         userName: "선생님",
-        scriptUrl: regScriptUrl.trim() || undefined
+        scriptUrl: regScriptUrl.trim() || undefined,
+        email: regEmail.trim()
       });
       toast.dismiss("reg-loading");
 
@@ -310,6 +340,21 @@ export function LoginPanel({
                 </div>
               </div>
 
+              {/* Register Email Address */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-foreground flex items-center gap-1">
+                  <Globe className="size-3.5 text-neon-blue" /> 이메일 주소 (비밀번호 복구용)
+                </Label>
+                <Input
+                  required
+                  type="email"
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                  placeholder="비밀번호 분실 시 수신할 이메일 주소를 입력하세요"
+                  className="h-10 border-border/60 bg-background/40 focus:border-neon-blue transition-all"
+                />
+              </div>
+
               {/* Optional scriptUrl API */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-bold text-foreground flex items-center justify-between">
@@ -368,12 +413,19 @@ export function LoginPanel({
                     className="h-10 border-border/60 bg-background/40 hover:border-neon-blue/60 focus:border-neon-blue focus:ring-1 focus:ring-neon-blue transition-all"
                   />
                   
-                  {/* Register account toggle */}
-                  <div className="text-right pt-1">
+                  {/* Register account toggle & Forgot password */}
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsRecoverModalOpen(true)}
+                      className="text-xs font-bold text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      비밀번호를 잊으셨나요?
+                    </button>
                     <button
                       type="button"
                       onClick={() => setIsRegisterMode(true)}
-                      className="text-xs font-bold text-neon-blue hover:underline flex items-center gap-1 ml-auto"
+                      className="text-xs font-bold text-neon-blue hover:underline flex items-center gap-1"
                     >
                       <UserPlus className="size-3.5" /> 새로운 학교/교사 계정 등록하기
                     </button>
@@ -503,6 +555,67 @@ export function LoginPanel({
         </div>
 
       </Card>
+
+      {/* 5. 비밀번호 찾기 (비밀번호 자가 복구) 모달 */}
+      {isRecoverModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+          <Card className="w-full max-w-md border-border/60 bg-card/95 p-6 rounded-2xl shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="text-center mb-6">
+              <h3 className="text-lg font-black text-foreground">🔑 교사 비밀번호 분실 자가 복구</h3>
+              <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+                가입 시 입력했던 학교명과 이메일 주소가 일치하는 경우, 등록된 이메일로 현재 설정된 교사 인증코드를 자동 전송합니다.
+              </p>
+            </div>
+
+            <form onSubmit={handleRecoverSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-foreground">학교 이름</Label>
+                <Input
+                  required
+                  value={recoverSchoolName}
+                  onChange={(e) => setRecoverSchoolName(e.target.value)}
+                  placeholder="가입 시 정확한 학교명 (예: 대한초등학교)"
+                  className="h-10 border-border/60 bg-background/40 focus:border-neon-blue transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-foreground">가입 이메일 주소</Label>
+                <Input
+                  required
+                  type="email"
+                  value={recoverEmail}
+                  onChange={(e) => setRecoverEmail(e.target.value)}
+                  placeholder="가입 시 등록한 이메일 주소 입력"
+                  className="h-10 border-border/60 bg-background/40 focus:border-neon-blue transition-all"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsRecoverModalOpen(false);
+                    setRecoverSchoolName("");
+                    setRecoverEmail("");
+                  }}
+                  className="h-10 rounded-xl"
+                >
+                  취소
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSyncing}
+                  className="h-10 rounded-xl bg-gradient-to-r from-neon-blue to-tier-diamond text-primary-foreground font-bold shadow-md active:scale-95 transition-all"
+                >
+                  {isSyncing ? "전송 중..." : "인증코드 찾기"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

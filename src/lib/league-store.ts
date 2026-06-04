@@ -584,6 +584,7 @@ export function useLeagueStore() {
     schoolName: string;
     userName: string;
     scriptUrl?: string;
+    email?: string;
   }) => {
     setIsSyncing(true);
     try {
@@ -606,6 +607,35 @@ export function useLeagueStore() {
     } catch (error) {
       console.error("Registration request failed:", error);
       return { success: false, message: "마스터 가입 서버에 접속할 수 없습니다." };
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
+  // 이메일 기반 비밀번호 자가 복구 기능 (GAS 연동)
+  const recoverPassword = useCallback(async (schoolName: string, email: string) => {
+    setIsSyncing(true);
+    try {
+      const response = await fetch(MASTER_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "RECOVER_PASSWORD",
+          schoolName: schoolName.trim(),
+          email: email.trim()
+        })
+      });
+      const data = await response.json();
+      if (data.status === "success") {
+        return { success: true, message: data.message || "비밀번호가 이메일로 자동 발송되었습니다." };
+      } else {
+        return { success: false, message: data.message || "해당 정보와 일치하는 계정을 찾을 수 없습니다." };
+      }
+    } catch (error) {
+      console.error("Password recovery request failed:", error);
+      return { success: false, message: "마스터 서버 통신 오류가 발생했습니다." };
     } finally {
       setIsSyncing(false);
     }
@@ -1836,6 +1866,7 @@ export function useLeagueStore() {
     loginUser,
     registerUser,
     logoutUser,
+    recoverPassword,
     MASTER_API_URL,
     tierThresholds,
     rpVariables,
