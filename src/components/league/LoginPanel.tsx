@@ -63,6 +63,7 @@ export function LoginPanel({
 
   // Register Inputs
   const [regSchoolName, setRegSchoolName] = useState("");
+  const [regUserName, setRegUserName] = useState("");
   const [regAccessCode, setRegAccessCode] = useState("");
   const [regAccessCodeConfirm, setRegAccessCodeConfirm] = useState("");
   const [regScriptUrl, setRegScriptUrl] = useState("");
@@ -112,6 +113,7 @@ export function LoginPanel({
     // 2. TEACHER REGISTER FLOW
     if (isRegisterMode && activeTab === "TEACHER") {
       if (!regSchoolName.trim()) return toast.error("등록할 학교 이름을 입력해 주세요.");
+      if (!regUserName.trim()) return toast.error("교사 이름을 입력해 주세요.");
       if (!regAccessCode.trim()) return toast.error("접속 시 사용할 4~10자리 인증코드를 지정해 주세요.");
       if (regAccessCode !== regAccessCodeConfirm) return toast.error("지정한 두 인증코드가 일치하지 않습니다.");
       if (!regEmail.trim()) return toast.error("비밀번호 분실 시 수신할 이메일 주소를 입력해 주세요.");
@@ -122,7 +124,7 @@ export function LoginPanel({
         password: regAccessCode.trim(),
         role: "TEACHER",
         schoolName: regSchoolName.trim(),
-        userName: "선생님",
+        userName: regUserName.trim(),
         scriptUrl: regScriptUrl.trim() || undefined,
         email: regEmail.trim()
       });
@@ -133,6 +135,12 @@ export function LoginPanel({
         setSchoolName(regSchoolName.trim());
         setAccessCode(regAccessCode.trim());
         setIsRegisterMode(false);
+        setRegSchoolName("");
+        setRegUserName("");
+        setRegAccessCode("");
+        setRegAccessCodeConfirm("");
+        setRegScriptUrl("");
+        setRegEmail("");
       } else {
         toast.error(res.message || "등록 중 오류가 발생했습니다. 이미 등록된 학교 이름이거나 서버 상태를 확인해 주세요.");
       }
@@ -304,6 +312,20 @@ export function LoginPanel({
                   value={regSchoolName}
                   onChange={(e) => setRegSchoolName(e.target.value)}
                   placeholder="정확한 학교 명칭 입력 (예: 대한초등학교)"
+                  className="h-10 border-border/60 bg-background/40 focus:border-neon-blue transition-all"
+                />
+              </div>
+
+              {/* Register Teacher Name */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-foreground flex items-center gap-1">
+                  <Users className="size-3.5 text-neon-blue" /> 교사 이름
+                </Label>
+                <Input
+                  required
+                  value={regUserName}
+                  onChange={(e) => setRegUserName(e.target.value)}
+                  placeholder="선생님 성함 입력 (예: 홍길동)"
                   className="h-10 border-border/60 bg-background/40 focus:border-neon-blue transition-all"
                 />
               </div>
