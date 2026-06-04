@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import type { Student, Match, Gender, TierName } from "./league-types";
 import { studentKey, getTier, getTierSubdivision, getFullTierLabel, TIER_ORDER } from "./league-types";
 import { toast } from "sonner";
@@ -150,6 +150,12 @@ export function useLeagueStore() {
   const [title, setTitle] = useState<string>("2026 초등 리그전");
   const [isLocked, setIsLocked] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [seasonList, setSeasonList] = useState<string[]>([]);
+  const [currentViewSeason, setCurrentViewSeason] = useState<string>("현재 시즌");
+  const currentViewSeasonRef = useRef(currentViewSeason);
+  useEffect(() => {
+    currentViewSeasonRef.current = currentViewSeason;
+  }, [currentViewSeason]);
 
   // 3대 역할 로그인 세션 상태
   const [session, setSession] = useState<UserSession>(null);
@@ -199,6 +205,10 @@ export function useLeagueStore() {
     previousStudents?: Student[],
     previousMatches?: Match[]
   ) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return false;
+    }
     // 세션에 개인 scriptUrl이 없으면 동기화 생략 (로컬 저장만 적용 - 게스트 모드 포함)
     if (!session || !session.scriptUrl) return;
     setIsSyncing(true);
@@ -353,6 +363,9 @@ export function useLeagueStore() {
                 setMatches(remoteData.matches);
                 saveJSON(MATCHES_KEY, remoteData.matches);
               }
+              if (remoteData.seasonList) {
+                setSeasonList(remoteData.seasonList);
+              }
             }
           } catch (err) {
             console.warn("Failed fetching student roster from school scriptUrl:", err);
@@ -496,6 +509,9 @@ export function useLeagueStore() {
               const fetchedMatches = remoteData.matches || [];
               setMatches(fetchedMatches);
               saveJSON(MATCHES_KEY, fetchedMatches);
+              if (remoteData.seasonList) {
+                setSeasonList(remoteData.seasonList);
+              }
             } else {
               const defaultStudents = isGuest ? SEED_STUDENTS : [];
               setStudents(defaultStudents);
@@ -627,6 +643,9 @@ export function useLeagueStore() {
                   const fetchedMatches = remoteData.matches || [];
                   setMatches(fetchedMatches);
                   saveJSON(MATCHES_KEY, fetchedMatches);
+                  if (remoteData.seasonList) {
+                    setSeasonList(remoteData.seasonList);
+                  }
                 } else {
                   const defaultStudents = isGuest ? SEED_STUDENTS : [];
                   setStudents(defaultStudents);
@@ -972,6 +991,9 @@ export function useLeagueStore() {
                   console.error("Failed parsing settingsBonus from remote GET:", e);
                 }
               }
+              if (data.seasonList) {
+                setSeasonList(data.seasonList);
+              }
               console.log("Google Sheets database synchronized on session load!");
             }
           } catch (error) {
@@ -1004,6 +1026,10 @@ export function useLeagueStore() {
     playerB2Id?: string,
     matchType: "single" | "double" = "single"
   ) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
     if (playerAId === playerBId) return;
     const aWon = scoreA > scoreB;
 
@@ -1254,6 +1280,10 @@ export function useLeagueStore() {
 
   // 경기 삭제(롤백) 및 동기화
   const deleteMatch = useCallback((matchId: string) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
     const match = matches.find((m) => m.id === matchId);
     if (!match) return;
 
@@ -1314,6 +1344,10 @@ export function useLeagueStore() {
 
   // 개별 학생 전적 리셋 및 동기화
   const resetStudent = useCallback((studentId: string) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
     const nextMatches = matches.filter(
       (m) => m.playerAId !== studentId && m.playerBId !== studentId && m.playerA2Id !== studentId && m.playerB2Id !== studentId
     );
@@ -1373,6 +1407,10 @@ export function useLeagueStore() {
 
   // 시즌 전체 초기화 및 동기화
   const resetAllData = useCallback(() => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
     const nextMatches: Match[] = [];
     const nextStudents = students.map((s) => ({
       ...s,
@@ -1388,6 +1426,10 @@ export function useLeagueStore() {
 
   // 교사 관리자 수동 RP 수정 및 동기화
   const updateStudentRP = useCallback((studentId: string, nextRp: number) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
     const nextStudents = students.map((s) => {
       if (s.id !== studentId) return s;
       return {
@@ -1402,6 +1444,10 @@ export function useLeagueStore() {
   // 새로운 명렬표 대량 업서트 및 동기화
   const upsertStudents = useCallback(
     (rows: { grade: number; classNum: number; number: number; name: string; gender?: Gender }[]) => {
+      if (currentViewSeasonRef.current !== "현재 시즌") {
+        toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+        return { added: 0, kept: 0 };
+      }
       let added = 0, kept = 0;
       const byKey = new Map(students.map((s) => [studentKey(s), s]));
       const next: Student[] = [];
@@ -1451,6 +1497,10 @@ export function useLeagueStore() {
 
   // 특정 학생의 성별 변경 및 구글 시트 동기화
   const updateStudentGender = useCallback((studentId: string, gender: Gender) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
     const nextStudents = students.map((s) => {
       if (s.id !== studentId) return s;
       return { ...s, gender };
@@ -1460,6 +1510,10 @@ export function useLeagueStore() {
 
   // 개별 학생 삭제 및 연쇄 삭제 & 전적 복구 롤백
   const deleteStudent = useCallback((studentId: string) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
     const matchesToRemove = matches.filter((m) => m.playerAId === studentId || m.playerBId === studentId || m.playerA2Id === studentId || m.playerB2Id === studentId);
     const nextMatches = matches.filter((m) => m.playerAId !== studentId && m.playerBId !== studentId && m.playerA2Id !== studentId && m.playerB2Id !== studentId);
 
@@ -1540,6 +1594,10 @@ export function useLeagueStore() {
 
   // CSV 롤백 복원 액션
   const restoreFromCSV = useCallback((restoredStudents: Student[], restoredMatches: Match[]) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
     setStudents(restoredStudents);
     setMatches(restoredMatches);
     saveJSON(STUDENTS_KEY, restoredStudents);
@@ -1548,6 +1606,10 @@ export function useLeagueStore() {
 
   // 교사 통제형 휴면 강등 일괄 RP 차감 액션
   const bulkDecayRP = useCallback((inactiveDays: number, decayAmount: number) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return 0;
+    }
     let affectedCount = 0;
     const goldCutoff = tierThresholds.Gold ?? 1200;
     const now = new Date().getTime();
@@ -1580,6 +1642,10 @@ export function useLeagueStore() {
 
   // 경기 점수 수정 및 보너스/RP 완벽 재계산 액션
   const updateMatchScore = useCallback((matchId: string, nextScoreA: number, nextScoreB: number) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
     const match = matches.find((m) => m.id === matchId);
     if (!match) return;
 
@@ -1869,6 +1935,10 @@ export function useLeagueStore() {
 
   // 리그 커스텀 설정 통합 저장 (마스터 DB 동기화 포함)
   const saveLeagueSettings = useCallback(async (newTitle: string, newBonuses: ActiveBonuses, newOpMode?: "school" | "club") => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 설정은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
     const targetOpMode = newOpMode !== undefined ? newOpMode : opMode;
     setTitle(newTitle);
     setActiveBonuses(newBonuses);
@@ -2213,6 +2283,112 @@ export function useLeagueStore() {
     }
   }, [students, hydrated, session, tierThresholds]);
 
+  // 5. CHANGE_SEASON API 액션 메소드
+  const changeSeason = useCallback(async (seasonName: string) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return { success: false, message: "Read-only mode" };
+    }
+    if (!session || !session.scriptUrl) {
+      toast.error("로그인 세션이 없거나 연동된 시트 주소가 없습니다.");
+      return { success: false, message: "No scriptUrl" };
+    }
+    setIsSyncing(true);
+    try {
+      const res = await fetch(session.scriptUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "CHANGE_SEASON",
+          seasonName
+        })
+      });
+
+      if (res.status === 429 || res.status === 500 || res.status === 503) {
+        throw new Error(`STATUS_${res.status}`);
+      }
+
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {}
+
+      if (data && data.status === "success") {
+        return { success: true };
+      } else {
+        return { success: false, message: (data && data.message) || "시즌 변경 실패" };
+      }
+    } catch (error: any) {
+      console.error("CHANGE_SEASON request failed:", error);
+      return { success: false, message: error.message || "Network Error" };
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [session]);
+
+  // 6. 과거 시즌 데이터 Fetch 액션 메소드
+  const changeViewSeason = useCallback(async (seasonName: string) => {
+    setCurrentViewSeason(seasonName);
+    if (!session || !session.scriptUrl) return;
+    setIsSyncing(true);
+    try {
+      const url = seasonName === "현재 시즌"
+        ? session.scriptUrl
+        : `${session.scriptUrl}${session.scriptUrl.includes("?") ? "&" : "?"}seasonName=${encodeURIComponent(seasonName)}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.status === "success") {
+        if (data.students) {
+          const mappedStudents = data.students.map((s: any) => ({
+            ...s,
+            grade: s.grade ? Number(s.grade) : 0,
+            classNum: s.classNum ? Number(s.classNum) : 0,
+            number: s.number ? Number(s.number) : 0
+          }));
+          setStudents(mappedStudents);
+          saveJSON(STUDENTS_KEY, mappedStudents);
+        }
+        if (data.matches) {
+          setMatches(data.matches);
+          saveJSON(MATCHES_KEY, data.matches);
+        }
+        if (data.leagueName) {
+          setTitle(data.leagueName);
+          saveJSON(TITLE_KEY, data.leagueName);
+        }
+        if (data.settingsBonus) {
+          try {
+            const parsed = typeof data.settingsBonus === "string" 
+              ? JSON.parse(data.settingsBonus) 
+              : data.settingsBonus;
+            setActiveBonuses(parsed);
+            if (parsed && parsed.opMode) {
+              setOpMode(parsed.opMode);
+              localStorage.setItem(OP_MODE_KEY, parsed.opMode);
+            }
+            saveJSON(BONUSES_KEY, parsed);
+          } catch (e) {
+            console.error("Failed parsing settingsBonus from remote GET:", e);
+          }
+        }
+        if (data.seasonList) {
+          setSeasonList(data.seasonList);
+        }
+        console.log(`Successfully loaded historical season data: ${seasonName}`);
+      } else {
+        toast.error("데이터 로드에 실패했습니다.");
+      }
+    } catch (error) {
+      console.error("Failed to load season data:", error);
+      toast.error("시즌 데이터를 불러오는데 실패했습니다.");
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [session]);
+
   return { 
     hydrated, 
     students, 
@@ -2250,6 +2426,10 @@ export function useLeagueStore() {
     setPromotionEvent,
     opMode,
     setOpMode,
-    getSchoolMode
+    getSchoolMode,
+    seasonList,
+    changeSeason,
+    currentViewSeason,
+    changeViewSeason
   };
 }

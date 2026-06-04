@@ -61,7 +61,11 @@ function Index() {
     activeBonuses,
     saveLeagueSettings,
     promotionEvent,
-    setPromotionEvent
+    setPromotionEvent,
+    seasonList,
+    changeSeason,
+    currentViewSeason,
+    changeViewSeason
   } = useLeagueStore();
 
   const [tab, setTab] = useState<Tab>("leaderboard");
@@ -86,6 +90,15 @@ function Index() {
       }
     }
   }, [session]);
+
+  // 과거 시즌 조회 시 쓰기/설정 탭에서 조회 전용 탭으로 강제 이동
+  useEffect(() => {
+    if (currentViewSeason !== "현재 시즌") {
+      if (tab === "record" || tab === "admin") {
+        setTab("leaderboard");
+      }
+    }
+  }, [currentViewSeason, tab]);
 
   // 학생 탭 접근 통제 보안 가드 (오직 myRecord, recommend, myAchievements 탭만 허용)
   useEffect(() => {
@@ -212,6 +225,25 @@ function Index() {
                 )}
               </div>
 
+              {/* Season Selection Dropdown */}
+              {session.role !== "MASTER" && (
+                <div className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-card/60 px-2.5 py-1 text-xs">
+                  <span className="font-bold text-muted-foreground mr-1">시즌:</span>
+                  <select
+                    value={currentViewSeason}
+                    onChange={(e) => changeViewSeason(e.target.value)}
+                    className="bg-transparent text-foreground font-bold focus:outline-none cursor-pointer pr-1"
+                  >
+                    <option value="현재 시즌" className="bg-background text-foreground font-bold">현재 시즌</option>
+                    {seasonList && seasonList.map((season) => (
+                      <option key={season} value={season} className="bg-background text-foreground font-bold">
+                        {season}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Registered student count */}
               {session.role !== "MASTER" && (
                 <div className="flex items-center gap-2 rounded-full border border-border/60 bg-card/60 px-4 py-1.5 text-xs">
@@ -266,9 +298,11 @@ function Index() {
                 ) : (
                   <>
                     {/* 1. 경기 기록 입력 (교사 전용) */}
-                    <TabButton active={tab === "record"} onClick={() => setTab("record")} icon={<Swords className="size-4" />}>
-                      경기 기록 입력
-                    </TabButton>
+                    {currentViewSeason === "현재 시즌" && (
+                      <TabButton active={tab === "record"} onClick={() => setTab("record")} icon={<Swords className="size-4" />}>
+                        경기 기록 입력
+                      </TabButton>
+                    )}
 
                     {/* 2. 매치 추천 (교사) */}
                     <TabButton active={tab === "recommend"} onClick={() => setTab("recommend")} icon={<Target className="size-4" />}>
@@ -281,9 +315,11 @@ function Index() {
                     </TabButton>
                     
                     {/* 4. 교사 관리자 (교사 전용) */}
-                    <TabButton active={tab === "admin"} onClick={() => setTab("admin")} icon={<Users className="size-4" />}>
-                      교사 관리자
-                    </TabButton>
+                    {currentViewSeason === "현재 시즌" && (
+                      <TabButton active={tab === "admin"} onClick={() => setTab("admin")} icon={<Users className="size-4" />}>
+                        교사 관리자
+                      </TabButton>
+                    )}
                   </>
                 )}
               </>
@@ -294,6 +330,21 @@ function Index() {
 
       {/* Main Panel Content Routing */}
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        {/* Read-Only Warning Banner */}
+        {currentViewSeason !== "현재 시즌" && (
+          <div className="mb-6 flex items-center gap-3 rounded-xl border border-amber-500/35 bg-amber-500/10 p-4 text-amber-200 shadow-[0_0_15px_rgba(245,158,11,0.08)] animate-in slide-in-from-top duration-200">
+            <ShieldAlert className="size-5 shrink-0 text-amber-500" />
+            <div className="flex-1 text-xs sm:text-sm">
+              <span className="font-black">읽기 전용 모드 활성화</span>: 과거 시즌 <strong className="text-amber-400 font-extrabold">{currentViewSeason}</strong>의 데이터를 열람 중입니다. 새로운 경기 기록이나 정보 수정이 제한됩니다.
+            </div>
+            <button
+              onClick={() => changeViewSeason("현재 시즌")}
+              className="text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-lg px-3 py-1.5 font-bold transition-all active:scale-95 shrink-0 cursor-pointer"
+            >
+              현재 시즌으로 복귀
+            </button>
+          </div>
+        )}
         {/* Master Panel */}
         {session.role === "MASTER" && tab === "masterAdmin" && (
           <MasterAdminPanel masterApiUrl={MASTER_API_URL} />
@@ -326,6 +377,7 @@ function Index() {
                 thresholds={tierThresholds}
                 onUpdateGender={updateStudentGender}
                 isStudentView={session?.role === "STUDENT"}
+                isReadOnly={currentViewSeason !== "현재 시즌"}
               />
             )}
             
@@ -381,6 +433,8 @@ function Index() {
                 title={title}
                 activeBonuses={activeBonuses}
                 onSaveLeagueSettings={saveLeagueSettings}
+                seasonList={seasonList}
+                onChangeSeason={changeSeason}
               />
             )}
           </>

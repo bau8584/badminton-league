@@ -100,6 +100,8 @@ export function AdminPanel({
   title,
   activeBonuses,
   onSaveLeagueSettings,
+  seasonList,
+  onChangeSeason,
 }: {
   students: Student[];
   matches: Match[];
@@ -122,6 +124,8 @@ export function AdminPanel({
   title?: string;
   activeBonuses?: ActiveBonuses;
   onSaveLeagueSettings?: (title: string, bonuses: ActiveBonuses) => Promise<void>;
+  seasonList?: string[];
+  onChangeSeason?: (seasonName: string) => Promise<{ success: boolean; message?: string }>;
 }) {
   // CSV 롤백 복원 상태
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
@@ -132,6 +136,47 @@ export function AdminPanel({
   const [isUnlocked, setIsUnlocked] = useState(false);
   const { session } = useLeagueStore();
   const isDemo = session?.loginId === "guest" || session?.schoolName?.includes("꿈나무");
+
+  // 시즌 변경/초기화 관련 상태
+  const [isSeasonChangeModalOpen, setIsSeasonChangeModalOpen] = useState(false);
+  const [newSeasonName, setNewSeasonName] = useState("");
+  const [isSeasonChangeLoading, setIsSeasonChangeLoading] = useState(false);
+
+  const recommendedSeasonName = useMemo(() => {
+    if (!seasonList || seasonList.length === 0) {
+      return "시즌1";
+    }
+    
+    let maxNumber = 0;
+    let hasSeasonPattern = false;
+    
+    for (const season of seasonList) {
+      const sName = typeof season === "string" ? season : (season && typeof season === "object" && "name" in season ? String((season as any).name) : "");
+      if (!sName) continue;
+      
+      const match = sName.match(/시즌\s*(\d+)/);
+      if (match) {
+        hasSeasonPattern = true;
+        const num = parseInt(match[1], 10);
+        if (num > maxNumber) {
+          maxNumber = num;
+        }
+      } else {
+        const numbers = sName.match(/\d+/g);
+        if (numbers) {
+          const lastNum = parseInt(numbers[numbers.length - 1], 10);
+          if (lastNum > maxNumber) {
+            maxNumber = lastNum;
+          }
+        }
+      }
+    }
+    
+    if (hasSeasonPattern || maxNumber > 0) {
+      return `시즌${maxNumber + 1}`;
+    }
+    return "시즌1";
+  }, [seasonList]);
 
   // 경기 점수 세부 수정 기능 상태
   const [editingMatchId, setEditingMatchId] = useState<string | null>(null);
@@ -619,6 +664,39 @@ export function AdminPanel({
     };
     reader.readAsText(file, "UTF-8");
     e.target.value = ""; // Input 초기화
+  };
+
+  const handleOpenSeasonChangeModal = () => {
+    setNewSeasonName(recommendedSeasonName);
+    setIsSeasonChangeModalOpen(true);
+  };
+
+  const handleSeasonChangeSubmit = async () => {
+    if (!newSeasonName.trim()) {
+      return toast.error("시즌명을 입력해주세요.");
+    }
+    if (!onChangeSeason) {
+      return toast.error("시즌 변경 기능이 지원되지 않는 세션입니다.");
+    }
+
+    setIsSeasonChangeLoading(true);
+    try {
+      const res = await onChangeSeason(newSeasonName.trim());
+      if (res.success) {
+        toast.success("새 시즌이 시작되었습니다!");
+        setIsSeasonChangeModalOpen(false);
+        setTimeout(() => {
+          window.location.reload();
+        }, 1200);
+      } else {
+        toast.error(res.message || "새 시즌 시작 처리에 실패했습니다.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error("오류가 발생했습니다: " + err.message);
+    } finally {
+      setIsSeasonChangeLoading(false);
+    }
   };
 
   // Global reset check
@@ -2153,15 +2231,36 @@ export function AdminPanel({
       )}
 
       {/* 4. Danger Zone: Global Reset with Password Verification */}
-      <Card className="border border-destructive/40 bg-destructive/5 p-5 backdrop-blur shadow-lg">
-        <div className="flex items-center gap-2 text-destructive mb-3">
+      <Card className="border border-destructive/40 bg-destructive/5 p-5 backdrop-blur shadow-lg space-y-6">
+        <div className="flex items-center gap-2 text-destructive">
           <ShieldAlert className="size-5" />
           <h3 className="font-black text-base">위험 구역 (Danger Zone)</h3>
         </div>
         
+        {/* 아카이브 백업 방식 새 시즌 시작 */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-destructive/10 pb-6">
+          <div className="max-w-xl">
+            <h4 className="text-sm font-bold text-foreground">새 시즌 아카이브 시작 (추천)</h4>
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+              현재 리그의 전체 경기 결과와 학생 데이터를 지정된 명칭의 **아카이브 시트로 복제 및 안전 백업**한 뒤, 메인 리그를 초기 상태(1000 RP, 0승 0패)로 깔끔하게 리셋합니다.
+            </p>
+          </div>
+          
+          <div className="shrink-0 self-end sm:self-center">
+            <Button
+              onClick={handleOpenSeasonChangeModal}
+              variant="destructive"
+              className="bg-destructive font-black tracking-wide hover:bg-destructive/80 active:scale-95 transition-all shadow-[0_0_15px_rgba(239,68,68,0.3)]"
+            >
+              <RotateCcw className="mr-2 size-4" /> 새 시즌 시작 (데이터 초기화)
+            </Button>
+          </div>
+        </div>
+
+        {/* 기존 완전 소멸 방식 리셋 */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="max-w-xl">
-            <h4 className="text-sm font-bold text-foreground">새 시즌 시작 (전체 기록 리셋)</h4>
+            <h4 className="text-sm font-bold text-foreground">로컬 전체 기록 강제 리셋 (기록 소멸)</h4>
             <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
               이 작업은 시스템 상의 **모든 등록된 학생들의 경기 타임라인 및 결과 기록을 완벽히 소멸**시키고, 전체 학생의 RP 점수 및 전적 데이터를 **초기값(1000점, 0승 0패, 최근기록 없음)**으로 일괄 초기화합니다. 실행 시 교사 승인 비밀번호 입력이 필요합니다.
             </p>
@@ -2178,6 +2277,69 @@ export function AdminPanel({
           </div>
         </div>
       </Card>
+
+      {/* Season Change Modal Overlaid */}
+      {isSeasonChangeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <Card className="max-w-md w-full border border-destructive/30 bg-background p-6 shadow-2xl rounded-2xl relative z-50 animate-in zoom-in-95 duration-200">
+            <h4 className="text-base font-black mb-2 flex items-center gap-1.5 text-destructive">
+              <ShieldAlert className="size-5" /> 새 시즌 시작 및 데이터 초기화
+            </h4>
+            <p className="text-xs text-muted-foreground leading-relaxed mb-4">
+              새로운 시즌을 시작하시겠습니까? 현재 기록은 아카이브로 이동하고 메인 데이터는 초기화됩니다.
+            </p>
+
+            <div className="space-y-3 bg-muted/20 p-4 rounded-xl border border-border/30 mb-5">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  새 시즌 이름
+                </label>
+                <Input
+                  type="text"
+                  value={newSeasonName}
+                  onChange={(e) => setNewSeasonName(e.target.value)}
+                  placeholder="예: 시즌2 또는 2026 2학기"
+                  className="font-sans font-bold h-11 bg-background border-border/65 focus-visible:ring-destructive/50"
+                  disabled={isSeasonChangeLoading}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  (기존 백업 목록을 스캔하여 추천된 명칭이며, 자유롭게 커스텀 입력이 가능합니다.)
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={() => setIsSeasonChangeModalOpen(false)}
+                variant="outline"
+                className="w-1/2 h-10 font-bold border-border/80 text-foreground rounded-xl"
+                disabled={isSeasonChangeLoading}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSeasonChangeSubmit}
+                className="w-1/2 h-10 font-black bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-xl flex items-center justify-center gap-1.5"
+                disabled={isSeasonChangeLoading}
+              >
+                {isSeasonChangeLoading ? (
+                  <>
+                    <span className="size-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    <span>진행 중...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="size-4" />
+                    <span>확인 (실행)</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* CSV 롤백 복원 경고 팝업 */}
       <AlertDialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>

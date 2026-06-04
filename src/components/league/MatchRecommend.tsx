@@ -29,6 +29,7 @@ export function MatchRecommend({
   thresholds,
   onUpdateGender,
   isStudentView = false,
+  isReadOnly = false,
 }: {
   students: Student[];
   matches: Match[];
@@ -44,6 +45,7 @@ export function MatchRecommend({
   thresholds?: Record<string, number>;
   onUpdateGender?: (studentId: string, gender: "M" | "F" | "U") => void;
   isStudentView?: boolean;
+  isReadOnly?: boolean;
 }) {
   const player = students.find((s) => s.id === sel.studentId) ?? null;
 
@@ -711,6 +713,10 @@ export function MatchRecommend({
                       {isStudentView ? (
                         <div className="mt-5 w-full text-center py-2.5 rounded-lg border border-neon-blue/30 bg-neon-blue/5 text-neon-blue text-xs font-black tracking-wide flex items-center justify-center gap-1.5 shadow-[0_0_12px_rgba(0,180,216,0.1)]">
                           <Swords className="size-4 animate-pulse" /> ⚔️ 추천 도전 라이벌
+                        </div>
+                      ) : isReadOnly ? (
+                        <div className="mt-5 w-full text-center py-2.5 rounded-lg border border-muted/30 bg-muted/5 text-muted-foreground text-xs font-bold tracking-wide flex items-center justify-center gap-1.5">
+                          <Swords className="size-4 opacity-50" /> ⚔️ 경기하기 (읽기 전용)
                         </div>
                       ) : (
                         <Button
