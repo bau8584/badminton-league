@@ -45,6 +45,42 @@ function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+// 교사/학교 매핑 목록 로컬 캐싱 기능 (구글 시트 API 속도 개선)
+async function getTeachersList(forceRefresh = false): Promise<any[]> {
+  if (typeof window === "undefined") return [];
+  const TEACHERS_CACHE_KEY = "bdm.teachers_list.cache";
+  const TEACHERS_CACHE_TIME_KEY = "bdm.teachers_list.cache_time";
+  const CACHE_DURATION = 60 * 60 * 1000; // 1시간 캐싱
+
+  if (!forceRefresh) {
+    try {
+      const cachedListStr = localStorage.getItem(TEACHERS_CACHE_KEY);
+      const cachedTimeStr = localStorage.getItem(TEACHERS_CACHE_TIME_KEY);
+      if (cachedListStr && cachedTimeStr) {
+        const cachedTime = parseInt(cachedTimeStr, 10);
+        if (Date.now() - cachedTime < CACHE_DURATION) {
+          return JSON.parse(cachedListStr);
+        }
+      }
+    } catch (e) {
+      console.warn("Error reading teachers list cache:", e);
+    }
+  }
+
+  try {
+    const teachersRes = await fetch(`${MASTER_API_URL}?action=GET_TEACHERS`);
+    const teachersData = await teachersRes.json();
+    if (teachersData.status === "success" && teachersData.teachers) {
+      localStorage.setItem(TEACHERS_CACHE_KEY, JSON.stringify(teachersData.teachers));
+      localStorage.setItem(TEACHERS_CACHE_TIME_KEY, Date.now().toString());
+      return teachersData.teachers;
+    }
+  } catch (error) {
+    console.error("Failed to fetch matching school list:", error);
+  }
+  return [];
+}
+
 const SEED_STUDENTS: Student[] = [
   { id: uid(), grade: 5, classNum: 1, number: 1,  name: "강서준", gender: "M", rp: 1320, recent: ["W","W","L","W","W"], wins: 8, losses: 3 },
   { id: uid(), grade: 5, classNum: 1, number: 2,  name: "김민재", gender: "M", rp: 1180, recent: ["L","W","W","L","W"], wins: 6, losses: 5 },
@@ -209,19 +245,27 @@ export function useLeagueStore() {
       if (role === "STUDENT") {
         let schoolScriptUrl = "";
         try {
-          const teachersRes = await fetch(`${MASTER_API_URL}?action=GET_TEACHERS`);
-          const teachersData = await teachersRes.json();
-          if (teachersData.status === "success" && teachersData.teachers) {
-            const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
-            const targetSchool = normalizeSchool(cleanedSchool);
-            const matchedTeacher = teachersData.teachers.find(
+          let teachers = await getTeachersList();
+          const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
+          const targetSchool = normalizeSchool(cleanedSchool);
+          let matchedTeacher = teachers.find(
+            (t: any) => 
+              normalizeSchool(t.schoolName) === targetSchool || 
+              normalizeSchool(t.loginId) === targetSchool
+          );
+          
+          if (!matchedTeacher) {
+            // 캐시 미스 시 강제 새로고침
+            teachers = await getTeachersList(true);
+            matchedTeacher = teachers.find(
               (t: any) => 
                 normalizeSchool(t.schoolName) === targetSchool || 
                 normalizeSchool(t.loginId) === targetSchool
             );
-            if (matchedTeacher && matchedTeacher.scriptUrl) {
-              schoolScriptUrl = matchedTeacher.scriptUrl;
-            }
+          }
+
+          if (matchedTeacher && matchedTeacher.scriptUrl) {
+            schoolScriptUrl = matchedTeacher.scriptUrl;
           }
         } catch (err) {
           console.warn("Failed to retrieve matching school scriptUrl for student:", err);
@@ -279,19 +323,27 @@ export function useLeagueStore() {
       if (role === "TEACHER") {
         // 교사의 경우, 학교명 입력이 단축어 또는 실제 schoolName 혹은 loginId 에 해당하는지 마스터 교사 목록에서 조회하여 실제 ID 매핑
         try {
-          const teachersRes = await fetch(`${MASTER_API_URL}?action=GET_TEACHERS`);
-          const teachersData = await teachersRes.json();
-          if (teachersData.status === "success" && teachersData.teachers) {
-            const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
-            const targetSchool = normalizeSchool(cleanedSchool);
-            const matchedTeacher = teachersData.teachers.find(
+          let teachers = await getTeachersList();
+          const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
+          const targetSchool = normalizeSchool(cleanedSchool);
+          let matchedTeacher = teachers.find(
+            (t: any) => 
+              normalizeSchool(t.schoolName) === targetSchool || 
+              normalizeSchool(t.loginId) === targetSchool
+          );
+
+          if (!matchedTeacher) {
+            // 캐시 미스 시 강제 새로고침
+            teachers = await getTeachersList(true);
+            matchedTeacher = teachers.find(
               (t: any) => 
                 normalizeSchool(t.schoolName) === targetSchool || 
                 normalizeSchool(t.loginId) === targetSchool
             );
-            if (matchedTeacher) {
-              loginIdToUse = matchedTeacher.loginId;
-            }
+          }
+
+          if (matchedTeacher) {
+            loginIdToUse = matchedTeacher.loginId;
           }
         } catch (err) {
           console.warn("Failed to retrieve matching teacher loginId from GET_TEACHERS, using cleanedSchool directly:", err);
@@ -631,22 +683,25 @@ export function useLeagueStore() {
         const cachedCode = localStorage.getItem("bdm.teacherAccessCode.v1") || "";
         if ((cachedSession.role === "TEACHER" || cachedSession.role === "MASTER") && cachedCode) {
           try {
-            let loginIdToVerify = cachedSession.role === "MASTER" ? cachedSession.loginId : cachedSession.schoolName;
+            let loginIdToVerify = cachedSession.loginId;
 
-            if (cachedSession.role === "TEACHER") {
-              const teachersRes = await fetch(`${MASTER_API_URL}?action=GET_TEACHERS`);
-              const teachersData = await teachersRes.json();
-              if (teachersData.status === "success" && teachersData.teachers) {
+            if (!loginIdToVerify && cachedSession.role === "TEACHER") {
+              try {
+                const teachers = await getTeachersList();
                 const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
                 const targetSchool = normalizeSchool(cachedSession.schoolName);
-                const matchedTeacher = teachersData.teachers.find(
+                const matchedTeacher = teachers.find(
                   (t: any) => 
                     normalizeSchool(t.schoolName) === targetSchool || 
                     normalizeSchool(t.loginId) === targetSchool
                 );
                 if (matchedTeacher) {
                   loginIdToVerify = matchedTeacher.loginId;
+                } else {
+                  loginIdToVerify = cachedSession.schoolName;
                 }
+              } catch (e) {
+                loginIdToVerify = cachedSession.schoolName;
               }
             }
 
