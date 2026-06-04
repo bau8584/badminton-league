@@ -203,80 +203,44 @@ export function useLeagueStore() {
     if (!session || !session.scriptUrl) return;
     setIsSyncing(true);
 
-    const performSync = async (): Promise<{ success: boolean; isCongested: boolean }> => {
-      try {
-        const res = await fetch(session.scriptUrl!, {
-          method: "POST",
-          headers: {
-            "Content-Type": "text/plain;charset=utf-8",
-          },
-          body: JSON.stringify({
-            action: "SYNC_ALL",
-            students: currentStudents,
-            matches: currentMatches
-          })
-        });
-
-        if (res.status === 429 || res.status === 503) {
-          return { success: false, isCongested: true };
-        }
-
-        const text = await res.text();
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch (e) {}
-
-        if (data && data.status === "error" && data.message && (data.message.includes("혼잡") || data.message.includes("busy"))) {
-          return { success: false, isCongested: true };
-        }
-
-        if (data && data.status === "success") {
-          return { success: true, isCongested: false };
-        }
-
-        return { success: false, isCongested: false };
-      } catch (error) {
-        console.error("Synchronization attempt failed:", error);
-        return { success: false, isCongested: false };
-      }
-    };
-
-    // 1차 시도
-    let result = await performSync();
-
-    // 락 획득 실패 등으로 혼잡한 경우 3초 대기 후 자동으로 2차 시도 (재시도)
-    if (!result.success && result.isCongested) {
-      toast.warning("다른 사용자가 기록을 입력 중입니다. 3초 후 다시 시도합니다...", {
-        id: "sync-lock-retry",
-        duration: 3000
+    try {
+      const res = await fetch(session.scriptUrl!, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "SYNC_ALL",
+          students: currentStudents,
+          matches: currentMatches
+        })
       });
 
-      // 3초 대기
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-
-      // 2차 시도 (재시도)
-      result = await performSync();
-      
-      if (result.success) {
-        toast.success("기록이 성공적으로 저장되었습니다.", { id: "sync-lock-success" });
-      }
-    }
-
-    if (!result.success) {
-      if (result.isCongested) {
-        toast.error("다른 사용자가 기록을 입력 중입니다. 3초 후 다시 시도해주세요.", {
-          id: "sync-lock-error",
-          duration: 5000
-        });
-      } else {
-        toast.error("서버 동기화에 실패했습니다. 네트워크 상태를 확인해주세요.", {
-          id: "sync-error",
-          duration: 5000
-        });
+      if (res.status === 429 || res.status === 500 || res.status === 503) {
+        throw new Error(`STATUS_${res.status}`);
       }
 
-      // 동기화 실패 시 입력을 취소하기 위해 이전 상태로 롤백
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {}
+
+      if (data && data.status === "error") {
+        throw new Error(data.message || "SYNC_ERROR");
+      }
+
+      console.log("Successfully synced all league data to tenant Google Sheets!");
+    } catch (error) {
+      console.error("Synchronization failed:", error);
+
+      // 서버 혼잡 또는 네트워크 오류 발생 시 즉시 알림 및 롤백
+      toast.error("서버 혼잡 또는 네트워크 오류로 기록이 취소되었습니다. 다시 시도해주세요.", {
+        id: "sync-lock-error",
+        duration: 5000
+      });
+
+      // 동기화 실패 시 입력을 취소하기 위해 이전 상태로 즉시 롤백
       if (previousStudents) {
         setStudents(previousStudents);
         saveJSON(STUDENTS_KEY, previousStudents);
@@ -285,11 +249,9 @@ export function useLeagueStore() {
         setMatches(previousMatches);
         saveJSON(MATCHES_KEY, previousMatches);
       }
-    } else {
-      console.log("Successfully synced all league data to tenant Google Sheets!");
+    } finally {
+      setIsSyncing(false);
     }
-
-    setIsSyncing(false);
   }, [session]);
 
   // 2. 로그인 수행 함수 (간편 로그인 시스템 도입 - 이메일/PW 제거, 동명이인 방지 추가)
@@ -1228,277 +1190,257 @@ export function useLeagueStore() {
       revengeBonusB2: statB2?.revengeBonus,
     };
     
-    let nextMatches: Match[] = [];
-    setMatches((prev) => {
-      nextMatches = [match, ...prev];
-      return nextMatches;
-    });
+    const nextMatches = [match, ...matches];
 
-    setStudents((prev) => {
-      const nextStudents = prev.map((s) => {
-        const pStat = playerStats.find((p) => p.id === s.id);
-        if (!pStat) return s;
+    const nextStudents = students.map((s) => {
+      const pStat = playerStats.find((p) => p.id === s.id);
+      if (!pStat) return s;
 
-        const won = pStat.won;
-        const delta = pStat.delta;
+      const won = pStat.won;
+      const delta = pStat.delta;
 
-        const preRp = s.rp;
-        const preTier = getTier(preRp, tierThresholds);
-        const preTierRank = TIER_RANKING[preTier] ?? 1;
+      const preRp = s.rp;
+      const preTier = getTier(preRp, tierThresholds);
+      const preTierRank = TIER_RANKING[preTier] ?? 1;
 
-        let nextRp = preRp + delta;
-        let nextShields = s.demotionShields ?? 0;
+      let nextRp = preRp + delta;
+      let nextShields = s.demotionShields ?? 0;
 
-        if (won) {
-          const tentativeTier = getTier(nextRp, tierThresholds);
-          const tentativeTierRank = TIER_RANKING[tentativeTier] ?? 1;
-          if (tentativeTierRank > preTierRank) {
-            nextShields = 3; // 승급 시 방어막 3회 완충
-          }
-          nextRp = Math.max(0, nextRp);
-        } else {
-          const minThreshold = tierThresholds[preTier] ?? 0;
-          if (nextRp < minThreshold && preTier !== "Bronze") {
-            if (nextShields >= 1) {
-              nextRp = minThreshold; // 강등 방어막 가동
-              nextShields = nextShields - 1;
-            } else {
-              nextRp = Math.max(0, nextRp); // 방어막이 소진되어 강등
-            }
-          } else {
-            nextRp = Math.max(0, nextRp);
-          }
+      if (won) {
+        const tentativeTier = getTier(nextRp, tierThresholds);
+        const tentativeTierRank = TIER_RANKING[tentativeTier] ?? 1;
+        if (tentativeTierRank > preTierRank) {
+          nextShields = 3; // 승급 시 방어막 3회 완충
         }
+        nextRp = Math.max(0, nextRp);
+      } else {
+        const minThreshold = tierThresholds[preTier] ?? 0;
+        if (nextRp < minThreshold && preTier !== "Bronze") {
+          if (nextShields >= 1) {
+            nextRp = minThreshold; // 강등 방어막 가동
+            nextShields = nextShields - 1;
+          } else {
+            nextRp = Math.max(0, nextRp); // 방어막이 소진되어 강등
+          }
+        } else {
+          nextRp = Math.max(0, nextRp);
+        }
+      }
 
-        return {
-          ...s,
-          rp: nextRp,
-          wins: s.wins + (won ? 1 : 0),
-          losses: s.losses + (won ? 0 : 1),
-          recent: [(won ? "W" : "L") as "W" | "L", ...s.recent].slice(0, 5),
-          demotionShields: nextShields,
-          lastMatchDate: new Date().toISOString(),
-          lastWinDate: won ? todayYmd : s.lastWinDate,
-        };
-      });
-
-      syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
-      return nextStudents;
+      return {
+        ...s,
+        rp: nextRp,
+        wins: s.wins + (won ? 1 : 0),
+        losses: s.losses + (won ? 0 : 1),
+        recent: [(won ? "W" : "L") as "W" | "L", ...s.recent].slice(0, 5),
+        demotionShields: nextShields,
+        lastMatchDate: new Date().toISOString(),
+        lastWinDate: won ? todayYmd : s.lastWinDate,
+      };
     });
+
+    setMatches(nextMatches);
+    setStudents(nextStudents);
+
+    syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
 
     return match;
   }, [students, matches, syncWithGoogleSheets, rpVariables, tierThresholds]);
 
   // 경기 삭제(롤백) 및 동기화
   const deleteMatch = useCallback((matchId: string) => {
-    setMatches((prevMatches) => {
-      const match = prevMatches.find((m) => m.id === matchId);
-      if (!match) return prevMatches;
+  const deleteMatch = useCallback((matchId: string) => {
+    const match = matches.find((m) => m.id === matchId);
+    if (!match) return;
 
-      const nextMatches = prevMatches.filter((m) => m.id !== matchId);
+    const nextMatches = matches.filter((m) => m.id !== matchId);
 
-      setStudents((prevStudents) => {
-        const playerAId = match.playerAId;
-        const playerBId = match.playerBId;
-        const playerA2Id = match.playerA2Id;
-        const playerB2Id = match.playerB2Id;
-        const aWon = match.scoreA > match.scoreB;
+    const playerAId = match.playerAId;
+    const playerBId = match.playerBId;
+    const playerA2Id = match.playerA2Id;
+    const playerB2Id = match.playerB2Id;
+    const aWon = match.scoreA > match.scoreB;
 
-        const activePlayerIds = [playerAId, playerBId, playerA2Id, playerB2Id].filter(Boolean) as string[];
+    const activePlayerIds = [playerAId, playerBId, playerA2Id, playerB2Id].filter(Boolean) as string[];
 
-        const nextStudents = prevStudents.map((s) => {
-          if (!activePlayerIds.includes(s.id)) return s;
+    const nextStudents = students.map((s) => {
+      if (!activePlayerIds.includes(s.id)) return s;
 
-          const isTeamA = s.id === playerAId || s.id === playerA2Id;
-          const won = isTeamA ? aWon : !aWon;
-          
-          let rpDelta = 0;
-          if (s.id === playerAId) {
-            rpDelta = match.rpDeltaA !== undefined ? -match.rpDeltaA : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
-          } else if (s.id === playerBId) {
-            rpDelta = match.rpDeltaB !== undefined ? -match.rpDeltaB : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
-          } else if (s.id === playerA2Id) {
-            rpDelta = match.rpDeltaA2 !== undefined ? -match.rpDeltaA2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
-          } else if (s.id === playerB2Id) {
-            rpDelta = match.rpDeltaB2 !== undefined ? -match.rpDeltaB2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
-          }
-          const newRp = Math.max(0, s.rp + rpDelta);
-          const newWins = Math.max(0, s.wins - (won ? 1 : 0));
-          const newLosses = Math.max(0, s.losses - (won ? 0 : 1));
+      const isTeamA = s.id === playerAId || s.id === playerA2Id;
+      const won = isTeamA ? aWon : !aWon;
+      
+      let rpDelta = 0;
+      if (s.id === playerAId) {
+        rpDelta = match.rpDeltaA !== undefined ? -match.rpDeltaA : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+      } else if (s.id === playerBId) {
+        rpDelta = match.rpDeltaB !== undefined ? -match.rpDeltaB : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+      } else if (s.id === playerA2Id) {
+        rpDelta = match.rpDeltaA2 !== undefined ? -match.rpDeltaA2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+      } else if (s.id === playerB2Id) {
+        rpDelta = match.rpDeltaB2 !== undefined ? -match.rpDeltaB2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+      }
+      const newRp = Math.max(0, s.rp + rpDelta);
+      const newWins = Math.max(0, s.wins - (won ? 1 : 0));
+      const newLosses = Math.max(0, s.losses - (won ? 0 : 1));
 
-          const sMatches = nextMatches
-            .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
-            .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
-            .slice(0, 5);
+      const sMatches = nextMatches
+        .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
+        .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
+        .slice(0, 5);
 
-          const newRecent = sMatches.map((m) => {
-            const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
-            const mAWon = m.scoreA > m.scoreB;
-            const mWon = mIsA ? mAWon : !mAWon;
-            return mWon ? "W" : "L";
-          });
-
-          return {
-            ...s,
-            rp: newRp,
-            wins: newWins,
-            losses: newLosses,
-            recent: newRecent,
-          };
-        });
-
-        syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
-        return nextStudents;
+      const newRecent = sMatches.map((m) => {
+        const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
+        const mAWon = m.scoreA > m.scoreB;
+        const mWon = mIsA ? mAWon : !mAWon;
+        return mWon ? "W" : "L";
       });
 
-      return nextMatches;
+      return {
+        ...s,
+        rp: newRp,
+        wins: newWins,
+        losses: newLosses,
+        recent: newRecent,
+      };
     });
+
+    setMatches(nextMatches);
+    setStudents(nextStudents);
+
+    syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
   }, [students, matches, syncWithGoogleSheets, rpVariables]);
 
   // 개별 학생 전적 리셋 및 동기화
   const resetStudent = useCallback((studentId: string) => {
-    setMatches((prevMatches) => {
-      const nextMatches = prevMatches.filter(
-        (m) => m.playerAId !== studentId && m.playerBId !== studentId && m.playerA2Id !== studentId && m.playerB2Id !== studentId
-      );
+    const nextMatches = matches.filter(
+      (m) => m.playerAId !== studentId && m.playerBId !== studentId && m.playerA2Id !== studentId && m.playerB2Id !== studentId
+    );
 
-      const playedOpponents = new Set<string>();
-      prevMatches.forEach((m) => {
-        if (m.playerAId === studentId || m.playerA2Id === studentId) {
-          if (m.playerBId) playedOpponents.add(m.playerBId);
-          if (m.playerB2Id) playedOpponents.add(m.playerB2Id);
-          const partnerId = m.playerAId === studentId ? m.playerA2Id : m.playerAId;
-          if (partnerId) playedOpponents.add(partnerId);
-        }
-        if (m.playerBId === studentId || m.playerB2Id === studentId) {
-          if (m.playerAId) playedOpponents.add(m.playerAId);
-          if (m.playerA2Id) playedOpponents.add(m.playerA2Id);
-          const partnerId = m.playerBId === studentId ? m.playerB2Id : m.playerBId;
-          if (partnerId) playedOpponents.add(partnerId);
-        }
-      });
+    const playedOpponents = new Set<string>();
+    matches.forEach((m) => {
+      if (m.playerAId === studentId || m.playerA2Id === studentId) {
+        if (m.playerBId) playedOpponents.add(m.playerBId);
+        if (m.playerB2Id) playedOpponents.add(m.playerB2Id);
+        const partnerId = m.playerAId === studentId ? m.playerA2Id : m.playerAId;
+        if (partnerId) playedOpponents.add(partnerId);
+      }
+      if (m.playerBId === studentId || m.playerB2Id === studentId) {
+        if (m.playerAId) playedOpponents.add(m.playerAId);
+        if (m.playerA2Id) playedOpponents.add(m.playerA2Id);
+        const partnerId = m.playerBId === studentId ? m.playerB2Id : m.playerBId;
+        if (partnerId) playedOpponents.add(partnerId);
+      }
+    });
 
-      setStudents((prevStudents) => {
-        const nextStudents = prevStudents.map((s) => {
-          if (s.id === studentId) {
-            return {
-              ...s,
-              rp: 1000,
-              wins: 0,
-              losses: 0,
-              recent: [],
-            };
-          }
+    const nextStudents = students.map((s) => {
+      if (s.id === studentId) {
+        return {
+          ...s,
+          rp: 1000,
+          wins: 0,
+          losses: 0,
+          recent: [],
+        };
+      }
 
-          if (playedOpponents.has(s.id)) {
-            const sMatches = nextMatches
-              .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
-              .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
-              .slice(0, 5);
+      if (playedOpponents.has(s.id)) {
+        const sMatches = nextMatches
+          .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
+          .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
+          .slice(0, 5);
 
-            const newRecent = sMatches.map((m) => {
-              const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
-              const mAWon = m.scoreA > m.scoreB;
-              const mWon = mIsA ? mAWon : !mAWon;
-              return mWon ? "W" : "L";
-            });
-
-            return {
-              ...s,
-              recent: newRecent,
-            };
-          }
-
-          return s;
+        const newRecent = sMatches.map((m) => {
+          const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
+          const mAWon = m.scoreA > m.scoreB;
+          const mWon = mIsA ? mAWon : !mAWon;
+          return mWon ? "W" : "L";
         });
 
-        syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
-        return nextStudents;
-      });
+        return {
+          ...s,
+          recent: newRecent,
+        };
+      }
 
-      return nextMatches;
+      return s;
     });
+
+    setMatches(nextMatches);
+    setStudents(nextStudents);
+
+    syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
   }, [students, matches, syncWithGoogleSheets]);
 
   // 시즌 전체 초기화 및 동기화
   const resetAllData = useCallback(() => {
     const nextMatches: Match[] = [];
-    setMatches(nextMatches);
-    
-    setStudents((prev) => {
-      const nextStudents = prev.map((s) => ({
-        ...s,
-        rp: 1000,
-        wins: 0,
-        losses: 0,
-        recent: [],
-      }));
+    const nextStudents = students.map((s) => ({
+      ...s,
+      rp: 1000,
+      wins: 0,
+      losses: 0,
+      recent: [],
+    }));
 
-      syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
-      return nextStudents;
-    });
+    setMatches(nextMatches);
+    setStudents(nextStudents);
+
+    syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
   }, [students, matches, syncWithGoogleSheets]);
 
   // 교사 관리자 수동 RP 수정 및 동기화
   const updateStudentRP = useCallback((studentId: string, nextRp: number) => {
-    setStudents((prev) => {
-      const nextStudents = prev.map((s) => {
-        if (s.id !== studentId) return s;
-        return {
-          ...s,
-          rp: Math.max(0, nextRp),
-        };
-      });
-
-      syncWithGoogleSheets(nextStudents, matches, students, matches);
-      return nextStudents;
+    const nextStudents = students.map((s) => {
+      if (s.id !== studentId) return s;
+      return {
+        ...s,
+        rp: Math.max(0, nextRp),
+      };
     });
+
+    setStudents(nextStudents);
+    syncWithGoogleSheets(nextStudents, matches, students, matches);
   }, [students, matches, syncWithGoogleSheets]);
 
   // 새로운 명렬표 대량 업서트 및 동기화
   const upsertStudents = useCallback(
     (rows: { grade: number; classNum: number; number: number; name: string; gender?: Gender }[]) => {
       let added = 0, kept = 0;
-      let targetStudents: Student[] = [];
-
-      setStudents((prev) => {
-        const byKey = new Map(prev.map((s) => [studentKey(s), s]));
-        const next: Student[] = [];
-        const seenKeys = new Set<string>();
-        for (const r of rows) {
-          const k = studentKey(r);
-          if (seenKeys.has(k)) continue;
-          seenKeys.add(k);
-          const exists = byKey.get(k);
-          if (exists) {
-            kept++;
-            next.push({ ...exists, gender: r.gender ?? exists.gender });
-          } else {
-            added++;
-            next.push({
-              id: uid(),
-              grade: r.grade,
-              classNum: r.classNum,
-              number: r.number,
-              name: r.name,
-              gender: r.gender ?? "U",
-              rp: 1000,
-              recent: [],
-              wins: 0,
-              losses: 0,
-              demotionShields: 0,
-            });
-          }
+      const byKey = new Map(students.map((s) => [studentKey(s), s]));
+      const next: Student[] = [];
+      const seenKeys = new Set<string>();
+      for (const r of rows) {
+        const k = studentKey(r);
+        if (seenKeys.has(k)) continue;
+        seenKeys.add(k);
+        const exists = byKey.get(k);
+        if (exists) {
+          kept++;
+          next.push({ ...exists, gender: r.gender ?? exists.gender });
+        } else {
+          added++;
+          next.push({
+            id: uid(),
+            grade: r.grade,
+            classNum: r.classNum,
+            number: r.number,
+            name: r.name,
+            gender: r.gender ?? "U",
+            rp: 1000,
+            recent: [],
+            wins: 0,
+            losses: 0,
+            demotionShields: 0,
+          });
         }
-        for (const s of prev) {
-          const k = studentKey(s);
-          if (!seenKeys.has(k)) next.push(s);
-        }
-        targetStudents = next;
-        
-        syncWithGoogleSheets(targetStudents, matches, students, matches);
-        return next;
-      });
+      }
+      for (const s of students) {
+        const k = studentKey(s);
+        if (!seenKeys.has(k)) next.push(s);
+      }
+      
+      setStudents(next);
+      syncWithGoogleSheets(next, matches, students, matches);
 
       return { added, kept };
     },
@@ -1513,100 +1455,94 @@ export function useLeagueStore() {
 
   // 특정 학생의 성별 변경 및 구글 시트 동기화
   const updateStudentGender = useCallback((studentId: string, gender: Gender) => {
-    setStudents((prev) => {
-      const nextStudents = prev.map((s) => {
-        if (s.id !== studentId) return s;
-        return { ...s, gender };
-      });
-      syncWithGoogleSheets(nextStudents, matches, students, matches);
-      return nextStudents;
+    const nextStudents = students.map((s) => {
+      if (s.id !== studentId) return s;
+      return { ...s, gender };
     });
+    setStudents(nextStudents);
+    syncWithGoogleSheets(nextStudents, matches, students, matches);
   }, [students, matches, syncWithGoogleSheets]);
 
   // 개별 학생 삭제 및 연쇄 삭제 & 전적 복구 롤백
   const deleteStudent = useCallback((studentId: string) => {
-    setMatches((prevMatches) => {
-      const matchesToRemove = prevMatches.filter((m) => m.playerAId === studentId || m.playerBId === studentId || m.playerA2Id === studentId || m.playerB2Id === studentId);
-      const nextMatches = prevMatches.filter((m) => m.playerAId !== studentId && m.playerBId !== studentId && m.playerA2Id !== studentId && m.playerB2Id !== studentId);
+    const matchesToRemove = matches.filter((m) => m.playerAId === studentId || m.playerBId === studentId || m.playerA2Id === studentId || m.playerB2Id === studentId);
+    const nextMatches = matches.filter((m) => m.playerAId !== studentId && m.playerBId !== studentId && m.playerA2Id !== studentId && m.playerB2Id !== studentId);
 
-      setStudents((prevStudents) => {
-        // 1. 삭제할 학생 제외
-        let nextStudents = prevStudents.filter((s) => s.id !== studentId);
+    // 1. 삭제할 학생 제외
+    let nextStudents = students.filter((s) => s.id !== studentId);
 
-        // 2. 삭제되는 경기들의 상대방 & 아군 파트너 전적 복구
-        matchesToRemove.forEach((m) => {
-          const aWon = m.scoreA > m.scoreB;
-          const isPlayerA = m.playerAId === studentId || m.playerA2Id === studentId;
-          
-          const partnerId = isPlayerA 
-            ? (m.playerAId === studentId ? m.playerA2Id : m.playerAId) 
-            : (m.playerBId === studentId ? m.playerB2Id : m.playerBId);
-            
-          const oppIds = isPlayerA 
-            ? [m.playerBId, m.playerB2Id].filter(Boolean) as string[] 
-            : [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
+    // 2. 삭제되는 경기들의 상대방 & 아군 파트너 전적 복구
+    matchesToRemove.forEach((m) => {
+      const aWon = m.scoreA > m.scoreB;
+      const isPlayerA = m.playerAId === studentId || m.playerA2Id === studentId;
+      
+      const partnerId = isPlayerA 
+        ? (m.playerAId === studentId ? m.playerA2Id : m.playerAId) 
+        : (m.playerBId === studentId ? m.playerB2Id : m.playerBId);
+        
+      const oppIds = isPlayerA 
+        ? [m.playerBId, m.playerB2Id].filter(Boolean) as string[] 
+        : [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
 
-          const affectedPlayers = [
-            ...oppIds.map(id => ({ id, isOpponent: true })),
-            partnerId ? { id: partnerId, isOpponent: false } : null
-          ].filter(Boolean) as { id: string; isOpponent: boolean }[];
+      const affectedPlayers = [
+        ...oppIds.map(id => ({ id, isOpponent: true })),
+        partnerId ? { id: partnerId, isOpponent: false } : null
+      ].filter(Boolean) as { id: string; isOpponent: boolean }[];
 
-          nextStudents = nextStudents.map((s) => {
-            const affected = affectedPlayers.find(ap => ap.id === s.id);
-            if (!affected) return s;
+      nextStudents = nextStudents.map((s) => {
+        const affected = affectedPlayers.find(ap => ap.id === s.id);
+        if (!affected) return s;
 
-            let rpDelta = 0;
-            const won = affected.isOpponent ? !isPlayerA : isPlayerA;
-            
-            if (s.id === m.playerAId) {
-              rpDelta = m.rpDeltaA !== undefined ? -m.rpDeltaA : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
-            } else if (s.id === m.playerBId) {
-              rpDelta = m.rpDeltaB !== undefined ? -m.rpDeltaB : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
-            } else if (s.id === m.playerA2Id) {
-              rpDelta = m.rpDeltaA2 !== undefined ? -m.rpDeltaA2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
-            } else if (s.id === m.playerB2Id) {
-              rpDelta = m.rpDeltaB2 !== undefined ? -m.rpDeltaB2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
-            }
+        let rpDelta = 0;
+        const won = affected.isOpponent ? !isPlayerA : isPlayerA;
+        
+        if (s.id === m.playerAId) {
+          rpDelta = m.rpDeltaA !== undefined ? -m.rpDeltaA : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+        } else if (s.id === m.playerBId) {
+          rpDelta = m.rpDeltaB !== undefined ? -m.rpDeltaB : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+        } else if (s.id === m.playerA2Id) {
+          rpDelta = m.rpDeltaA2 !== undefined ? -m.rpDeltaA2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+        } else if (s.id === m.playerB2Id) {
+          rpDelta = m.rpDeltaB2 !== undefined ? -m.rpDeltaB2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+        }
 
-            const newRp = Math.max(0, s.rp + rpDelta);
-            const newWins = Math.max(0, s.wins - (won ? 1 : 0));
-            const newLosses = Math.max(0, s.losses - (won ? 0 : 1));
+        const newRp = Math.max(0, s.rp + rpDelta);
+        const newWins = Math.max(0, s.wins - (won ? 1 : 0));
+        const newLosses = Math.max(0, s.losses - (won ? 0 : 1));
 
-            return {
-              ...s,
-              rp: newRp,
-              wins: newWins,
-              losses: newLosses,
-            };
-          });
-        });
+        return {
+          ...s,
+          rp: newRp,
+          wins: newWins,
+          losses: newLosses,
+        };
+      });
+    });
 
-        // 3. 상대방들의 recent 배열 재구성
-        nextStudents = nextStudents.map((s) => {
-          const sMatches = nextMatches
-            .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
-            .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
-            .slice(0, 5);
+    // 3. 상대방들의 recent 배열 재구성
+    nextStudents = nextStudents.map((s) => {
+      const sMatches = nextMatches
+        .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
+        .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
+        .slice(0, 5);
 
-          const newRecent = sMatches.map((m) => {
-            const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
-            const mAWon = m.scoreA > m.scoreB;
-            const mWon = mIsA ? mAWon : !mAWon;
-            return mWon ? "W" : "L";
-          });
-
-          return {
-            ...s,
-            recent: newRecent,
-          };
-        });
-
-        syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
-        return nextStudents;
+      const newRecent = sMatches.map((m) => {
+        const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
+        const mAWon = m.scoreA > m.scoreB;
+        const mWon = mIsA ? mAWon : !mAWon;
+        return mWon ? "W" : "L";
       });
 
-      return nextMatches;
+      return {
+        ...s,
+        recent: newRecent,
+      };
     });
+
+    setMatches(nextMatches);
+    setStudents(nextStudents);
+
+    syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
   }, [students, matches, syncWithGoogleSheets, rpVariables]);
 
   // CSV 롤백 복원 액션
@@ -1621,338 +1557,326 @@ export function useLeagueStore() {
   // 교사 통제형 휴면 강등 일괄 RP 차감 액션
   const bulkDecayRP = useCallback((inactiveDays: number, decayAmount: number) => {
     let affectedCount = 0;
-    let nextStudents: Student[] = [];
+    const goldCutoff = tierThresholds.Gold ?? 1200;
+    const now = new Date().getTime();
+    const msThreshold = inactiveDays * 24 * 60 * 60 * 1000;
 
-    setStudents((prev) => {
-      const goldCutoff = tierThresholds.Gold ?? 1200;
-      const now = new Date().getTime();
-      const msThreshold = inactiveDays * 24 * 60 * 60 * 1000;
-
-      nextStudents = prev.map((s) => {
-        // Gold 등급 이상만 차감 대상
-        if (s.rp < goldCutoff) return s;
-        // 마지막 경기 전적이 존재하는 경우
-        if (s.lastMatchDate) {
-          const lastTime = new Date(s.lastMatchDate).getTime();
-          const elapsed = now - lastTime;
-          if (elapsed >= msThreshold) {
-            affectedCount++;
-            return {
-              ...s,
-              rp: Math.max(0, s.rp - decayAmount),
-            };
-          }
+    const nextStudents = students.map((s) => {
+      // Gold 등급 이상만 차감 대상
+      if (s.rp < goldCutoff) return s;
+      // 마지막 경기 전적이 존재하는 경우
+      if (s.lastMatchDate) {
+        const lastTime = new Date(s.lastMatchDate).getTime();
+        const elapsed = now - lastTime;
+        if (elapsed >= msThreshold) {
+          affectedCount++;
+          return {
+            ...s,
+            rp: Math.max(0, s.rp - decayAmount),
+          };
         }
-        return s;
-      });
-
-      if (affectedCount > 0) {
-        syncWithGoogleSheets(nextStudents, matches, students, matches);
       }
-      return nextStudents;
+      return s;
     });
+
+    if (affectedCount > 0) {
+      setStudents(nextStudents);
+      syncWithGoogleSheets(nextStudents, matches, students, matches);
+    }
 
     return affectedCount;
   }, [students, matches, tierThresholds, syncWithGoogleSheets]);
 
   // 경기 점수 수정 및 보너스/RP 완벽 재계산 액션
   const updateMatchScore = useCallback((matchId: string, nextScoreA: number, nextScoreB: number) => {
-    let updatedMatch: Match | null = null;
-    let nextMatchesList: Match[] = [];
-    let nextStudentsList: Student[] = [];
+    const match = matches.find((m) => m.id === matchId);
+    if (!match) return;
 
-    setMatches((prevMatches) => {
-      const match = prevMatches.find((m) => m.id === matchId);
-      if (!match) return prevMatches;
+    const playerAId = match.playerAId;
+    const playerBId = match.playerBId;
+    const playerA2Id = match.playerA2Id;
+    const playerB2Id = match.playerB2Id;
+    
+    const oldAWon = match.scoreA > match.scoreB;
+    const oldRpDeltaA = match.rpDeltaA ?? 0;
+    const oldRpDeltaB = match.rpDeltaB ?? 0;
+    const oldRpDeltaA2 = match.rpDeltaA2 ?? 0;
+    const oldRpDeltaB2 = match.rpDeltaB2 ?? 0;
 
-      const playerAId = match.playerAId;
-      const playerBId = match.playerBId;
-      const playerA2Id = match.playerA2Id;
-      const playerB2Id = match.playerB2Id;
+    const activePlayerIds = [playerAId, playerBId, playerA2Id, playerB2Id].filter(Boolean) as string[];
+
+    // 1. Rollback old match stats for all active students to get their "pre-match" state
+    const rolledBackStudents = students.map((s) => {
+      if (!activePlayerIds.includes(s.id)) return s;
+
+      const isTeamA = s.id === playerAId || s.id === playerA2Id;
+      const oldWon = isTeamA ? oldAWon : !oldAWon;
       
-      const oldAWon = match.scoreA > match.scoreB;
-      const oldRpDeltaA = match.rpDeltaA ?? 0;
-      const oldRpDeltaB = match.rpDeltaB ?? 0;
-      const oldRpDeltaA2 = match.rpDeltaA2 ?? 0;
-      const oldRpDeltaB2 = match.rpDeltaB2 ?? 0;
+      let oldDelta = 0;
+      if (s.id === playerAId) oldDelta = oldRpDeltaA;
+      else if (s.id === playerBId) oldDelta = oldRpDeltaB;
+      else if (s.id === playerA2Id) oldDelta = oldRpDeltaA2;
+      else if (s.id === playerB2Id) oldDelta = oldRpDeltaB2;
 
-      // 1. Rollback old match stats for all active students to get their "pre-match" state
-      setStudents((prevStudents) => {
-        const activePlayerIds = [playerAId, playerBId, playerA2Id, playerB2Id].filter(Boolean) as string[];
+      // Rollback wins, losses, RP
+      const newRp = Math.max(0, s.rp - oldDelta);
+      const newWins = Math.max(0, s.wins - (oldWon ? 1 : 0));
+      const newLosses = Math.max(0, s.losses - (oldWon ? 0 : 1));
 
-        const rolledBackStudents = prevStudents.map((s) => {
-          if (!activePlayerIds.includes(s.id)) return s;
+      return {
+        ...s,
+        rp: newRp,
+        wins: newWins,
+        losses: newLosses,
+      };
+    });
 
-          const isTeamA = s.id === playerAId || s.id === playerA2Id;
-          const oldWon = isTeamA ? oldAWon : !oldAWon;
-          
-          let oldDelta = 0;
-          if (s.id === playerAId) oldDelta = oldRpDeltaA;
-          else if (s.id === playerBId) oldDelta = oldRpDeltaB;
-          else if (s.id === playerA2Id) oldDelta = oldRpDeltaA2;
-          else if (s.id === playerB2Id) oldDelta = oldRpDeltaB2;
+    // 2. Perform recalculation using the rolled back students
+    const aWon = nextScoreA > nextScoreB;
+    
+    const activePlayers = [
+      { id: playerAId, role: "A" as const, isA: true },
+      { id: playerA2Id, role: "A2" as const, isA: true },
+      { id: playerBId, role: "B" as const, isA: false },
+      { id: playerB2Id, role: "B2" as const, isA: false }
+    ].filter((p) => p.id !== undefined && p.id !== "") as { id: string; role: "A" | "A2" | "B" | "B2"; isA: boolean }[];
 
-          // Rollback wins, losses, RP
-          const newRp = Math.max(0, s.rp - oldDelta);
-          const newWins = Math.max(0, s.wins - (oldWon ? 1 : 0));
-          const newLosses = Math.max(0, s.losses - (oldWon ? 0 : 1));
+    const today = new Date();
+    const offset = today.getTimezoneOffset();
+    const localToday = new Date(today.getTime() - (offset * 60 * 1000));
+    const todayYmd = localToday.toISOString().split("T")[0];
 
-          return {
-            ...s,
-            rp: newRp,
-            wins: newWins,
-            losses: newLosses,
-          };
-        });
+    const playerStats = activePlayers.map((p) => {
+      const student = rolledBackStudents.find((s) => s.id === p.id);
+      if (!student) return null;
 
-        // 2. Perform recalculation using the rolled back students
-        const aWon = nextScoreA > nextScoreB;
-        
-        const activePlayers = [
-          { id: playerAId, role: "A" as const, isA: true },
-          { id: playerA2Id, role: "A2" as const, isA: true },
-          { id: playerBId, role: "B" as const, isA: false },
-          { id: playerB2Id, role: "B2" as const, isA: false }
-        ].filter((p) => p.id !== undefined && p.id !== "") as { id: string; role: "A" | "A2" | "B" | "B2"; isA: boolean }[];
+      const won = p.isA ? aWon : !aWon;
+      const oppIds = p.isA 
+        ? [playerBId, playerB2Id].filter(Boolean) as string[] 
+        : [playerAId, playerA2Id].filter(Boolean) as string[];
+      const opponents = rolledBackStudents.filter((s) => oppIds.includes(s.id));
 
-        const today = new Date();
-        const offset = today.getTimezoneOffset();
-        const localToday = new Date(today.getTime() - (offset * 60 * 1000));
-        const todayYmd = localToday.toISOString().split("T")[0];
+      let underdogBonus = 0;
+      let scoreDiffBonus = 0;
+      let rivalBonus = 0;
+      let firstWinBonus = 0;
+      let revengeBonus = 0;
 
-        const playerStats = activePlayers.map((p) => {
-          const student = rolledBackStudents.find((s) => s.id === p.id);
-          if (!student) return null;
-
-          const won = p.isA ? aWon : !aWon;
-          const oppIds = p.isA 
-            ? [playerBId, playerB2Id].filter(Boolean) as string[] 
-            : [playerAId, playerA2Id].filter(Boolean) as string[];
-          const opponents = rolledBackStudents.filter((s) => oppIds.includes(s.id));
-
-          let underdogBonus = 0;
-          let scoreDiffBonus = 0;
-          let rivalBonus = 0;
-          let firstWinBonus = 0;
-          let revengeBonus = 0;
-
-          if (won) {
-            if (activeBonuses.underdog && opponents.length > 0) {
-              const playerTier = getTier(student.rp, tierThresholds);
-              const playerTierRank = TIER_RANKING[playerTier] ?? 1;
-              const maxOppRp = Math.max(...opponents.map((o) => o.rp));
-              const maxOppTier = getTier(maxOppRp, tierThresholds);
-              const maxOppTierRank = TIER_RANKING[maxOppTier] ?? 1;
-              if (playerTierRank < maxOppTierRank) {
-                underdogBonus = Math.max(0, Math.floor((maxOppRp - student.rp) * 0.1));
-              }
-            }
-
-            if (activeBonuses.scoreDiff) {
-              scoreDiffBonus = Math.abs(nextScoreA - nextScoreB);
-            }
-
-            if (activeBonuses.rival) {
-              rivalBonus = opponents.some((o) => Math.abs(student.rp - o.rp) <= 20) ? 5 : 0;
-            }
-
-            if (activeBonuses.firstWin) {
-              firstWinBonus = student.lastWinDate !== todayYmd ? 15 : 0;
-            }
-
-            if (activeBonuses.revenge) {
-              const pastMatches = prevMatches.filter((m) => m.id !== matchId);
-              const hasPastLoss = pastMatches.some((m) => {
-                const mTeamA = [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
-                const mTeamB = [m.playerBId, m.playerB2Id].filter(Boolean) as string[];
-                const mAWon = m.scoreA > m.scoreB;
-                
-                const sIsOnA = mTeamA.includes(student.id);
-                const sIsOnB = mTeamB.includes(student.id);
-                
-                if (sIsOnA) {
-                  const lost = !mAWon;
-                  const facedAnyOpp = mTeamB.some((oppId) => oppIds.includes(oppId));
-                  return lost && facedAnyOpp;
-                }
-                if (sIsOnB) {
-                  const lost = mAWon;
-                  const facedAnyOpp = mTeamA.some((oppId) => oppIds.includes(oppId));
-                  return lost && facedAnyOpp;
-                }
-                return false;
-              });
-              revengeBonus = hasPastLoss ? 10 : 0;
-            }
+      if (won) {
+        if (activeBonuses.underdog && opponents.length > 0) {
+          const playerTier = getTier(student.rp, tierThresholds);
+          const playerTierRank = TIER_RANKING[playerTier] ?? 1;
+          const maxOppRp = Math.max(...opponents.map((o) => o.rp));
+          const maxOppTier = getTier(maxOppRp, tierThresholds);
+          const maxOppTierRank = TIER_RANKING[maxOppTier] ?? 1;
+          if (playerTierRank < maxOppTierRank) {
+            underdogBonus = Math.max(0, Math.floor((maxOppRp - student.rp) * 0.1));
           }
+        }
 
-          const delta = won 
-            ? (rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus)
-            : -rpVariables.loseDelta;
+        if (activeBonuses.scoreDiff) {
+          scoreDiffBonus = Math.abs(nextScoreA - nextScoreB);
+        }
 
-          return {
-            id: student.id,
-            role: p.role,
-            isA: p.isA,
-            won,
-            delta,
-            underdogBonus,
-            scoreDiffBonus,
-            rivalBonus,
-            firstWinBonus,
-            revengeBonus
-          };
-        }).filter(Boolean) as {
-          id: string;
-          role: "A" | "A2" | "B" | "B2";
-          isA: boolean;
-          won: boolean;
-          delta: number;
-          underdogBonus: number;
-          scoreDiffBonus: number;
-          rivalBonus: number;
-          firstWinBonus: number;
-          revengeBonus: number;
-        }[];
+        if (activeBonuses.rival) {
+          rivalBonus = opponents.some((o) => Math.abs(student.rp - o.rp) <= 20) ? 5 : 0;
+        }
 
-        const statA = playerStats.find((p) => p.role === "A");
-        const statB = playerStats.find((p) => p.role === "B");
-        const statA2 = playerStats.find((p) => p.role === "A2");
-        const statB2 = playerStats.find((p) => p.role === "B2");
+        if (activeBonuses.firstWin) {
+          firstWinBonus = student.lastWinDate !== todayYmd ? 15 : 0;
+        }
 
-        // 승리팀 중 실시간 승급 효과 감지 (복식 지원으로 여러 명 동시 승급 가능)
-        const promotedPlayers = playerStats.filter((ps) => {
-          if (!ps.won) return false;
-          const s = rolledBackStudents.find((st) => st.id === ps.id);
-          if (!s) return false;
-          const finalRp = s.rp + ps.delta;
-          const prevTier = getTier(s.rp, tierThresholds);
-          const finalTier = getTier(finalRp, tierThresholds);
-          const prevSub = getTierSubdivision(s.rp, tierThresholds);
-          const finalSub = getTierSubdivision(finalRp, tierThresholds);
-          
-          const basePromoted = TIER_ORDER.indexOf(finalTier) < TIER_ORDER.indexOf(prevTier);
-          const subPromoted = finalTier === prevTier && finalSub < prevSub;
-          return basePromoted || subPromoted;
-        });
-
-        promotedPlayers.forEach((ps) => {
-          const s = rolledBackStudents.find((st) => st.id === ps.id);
-          if (s) {
-            const finalRp = s.rp + ps.delta;
-            const currentLabel = getFullTierLabel(finalRp, tierThresholds);
-            setPromotionEvent({
-              isPromoted: true,
-              newTier: currentLabel,
-              studentName: s.name
-            });
-          }
-        });
-
-        // 3. Construct the updated Match record
-        updatedMatch = {
-          ...match,
-          scoreA: nextScoreA,
-          scoreB: nextScoreB,
-          rpDeltaA: statA?.delta,
-          rpDeltaB: statB?.delta,
-          rpDeltaA2: statA2?.delta,
-          rpDeltaB2: statB2?.delta,
-          underdogBonusA: statA?.underdogBonus ?? 0,
-          underdogBonusB: statB?.underdogBonus ?? 0,
-          underdogBonusA2: statA2?.underdogBonus ?? 0,
-          underdogBonusB2: statB2?.underdogBonus ?? 0,
-          scoreDiffBonusA: statA?.scoreDiffBonus ?? 0,
-          scoreDiffBonusB: statB?.scoreDiffBonus ?? 0,
-          scoreDiffBonusA2: statA2?.scoreDiffBonus ?? 0,
-          scoreDiffBonusB2: statB2?.scoreDiffBonus ?? 0,
-          rivalBonusA: statA?.rivalBonus ?? 0,
-          rivalBonusB: statB?.rivalBonus ?? 0,
-          rivalBonusA2: statA2?.rivalBonus ?? 0,
-          rivalBonusB2: statB2?.rivalBonus ?? 0,
-          firstWinBonusA: statA?.firstWinBonus ?? 0,
-          firstWinBonusB: statB?.firstWinBonus ?? 0,
-          firstWinBonusA2: statA2?.firstWinBonus ?? 0,
-          firstWinBonusB2: statB2?.firstWinBonus ?? 0,
-          revengeBonusA: statA?.revengeBonus ?? 0,
-          revengeBonusB: statB?.revengeBonus ?? 0,
-          revengeBonusA2: statA2?.revengeBonus ?? 0,
-          revengeBonusB2: statB2?.revengeBonus ?? 0,
-        };
-
-        // 4. Update both students' stats with the new deltas
-        nextStudentsList = rolledBackStudents.map((s) => {
-          if (!activePlayerIds.includes(s.id)) return s;
-
-          const pStat = playerStats.find((p) => p.id === s.id);
-          if (!pStat) return s;
-
-          const won = pStat.won;
-          const delta = pStat.delta;
-
-          const preRp = s.rp;
-          const preTier = getTier(preRp, tierThresholds);
-          const preTierRank = TIER_RANKING[preTier] ?? 1;
-
-          let nextRp = preRp + delta;
-          let nextShields = s.demotionShields ?? 0;
-
-          if (won) {
-            const tentativeTier = getTier(nextRp, tierThresholds);
-            const tentativeTierRank = TIER_RANKING[tentativeTier] ?? 1;
-            if (tentativeTierRank > preTierRank) {
-              nextShields = 3; // 승급 시 3회 완충
-            }
-            nextRp = Math.max(0, nextRp);
-          } else {
-            const minThreshold = tierThresholds[preTier] ?? 0;
-            if (nextRp < minThreshold && preTier !== "Bronze") {
-              if (nextShields >= 1) {
-                nextRp = minThreshold;
-                nextShields = nextShields - 1;
-              } else {
-                nextRp = Math.max(0, nextRp);
-              }
-            } else {
-              nextRp = Math.max(0, nextRp);
-            }
-          }
-
-          // Build new recent array
-          const tempMatches = prevMatches.map((m) => m.id === matchId ? updatedMatch! : m);
-          const sMatches = tempMatches
-            .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
-            .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
-            .slice(0, 5);
-
-          const newRecent = sMatches.map((m) => {
-            const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
+        if (activeBonuses.revenge) {
+          const pastMatches = matches.filter((m) => m.id !== matchId);
+          const hasPastLoss = pastMatches.some((m) => {
+            const mTeamA = [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
+            const mTeamB = [m.playerBId, m.playerB2Id].filter(Boolean) as string[];
             const mAWon = m.scoreA > m.scoreB;
-            const mWon = mIsA ? mAWon : !mAWon;
-            return mWon ? "W" : "L";
+            
+            const sIsOnA = mTeamA.includes(student.id);
+            const sIsOnB = mTeamB.includes(student.id);
+            
+            if (sIsOnA) {
+              const lost = !mAWon;
+              const facedAnyOpp = mTeamB.some((oppId) => oppIds.includes(oppId));
+              return lost && facedAnyOpp;
+            }
+            if (sIsOnB) {
+              const lost = mAWon;
+              const facedAnyOpp = mTeamA.some((oppId) => oppIds.includes(oppId));
+              return lost && facedAnyOpp;
+            }
+            return false;
           });
+          revengeBonus = hasPastLoss ? 10 : 0;
+        }
+      }
 
-          return {
-            ...s,
-            rp: nextRp,
-            wins: s.wins + (won ? 1 : 0),
-            losses: s.losses + (won ? 0 : 1),
-            recent: newRecent,
-            demotionShields: nextShields,
-            lastMatchDate: new Date().toISOString(),
-            lastWinDate: won ? todayYmd : s.lastWinDate,
-          };
+      const delta = won 
+        ? (rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus)
+        : -rpVariables.loseDelta;
+
+      return {
+        id: student.id,
+        role: p.role,
+        isA: p.isA,
+        won,
+        delta,
+        underdogBonus,
+        scoreDiffBonus,
+        rivalBonus,
+        firstWinBonus,
+        revengeBonus
+      };
+    }).filter(Boolean) as {
+      id: string;
+      role: "A" | "A2" | "B" | "B2";
+      isA: boolean;
+      won: boolean;
+      delta: number;
+      underdogBonus: number;
+      scoreDiffBonus: number;
+      rivalBonus: number;
+      firstWinBonus: number;
+      revengeBonus: number;
+    }[];
+
+    const statA = playerStats.find((p) => p.role === "A");
+    const statB = playerStats.find((p) => p.role === "B");
+    const statA2 = playerStats.find((p) => p.role === "A2");
+    const statB2 = playerStats.find((p) => p.role === "B2");
+
+    // 승리팀 중 실시간 승급 효과 감지 (복식 지원으로 여러 명 동시 승급 가능)
+    const promotedPlayers = playerStats.filter((ps) => {
+      if (!ps.won) return false;
+      const s = rolledBackStudents.find((st) => st.id === ps.id);
+      if (!s) return false;
+      const finalRp = s.rp + ps.delta;
+      const prevTier = getTier(s.rp, tierThresholds);
+      const finalTier = getTier(finalRp, tierThresholds);
+      const prevSub = getTierSubdivision(s.rp, tierThresholds);
+      const finalSub = getTierSubdivision(finalRp, tierThresholds);
+      
+      const basePromoted = TIER_ORDER.indexOf(finalTier) < TIER_ORDER.indexOf(prevTier);
+      const subPromoted = finalTier === prevTier && finalSub < prevSub;
+      return basePromoted || subPromoted;
+    });
+
+    promotedPlayers.forEach((ps) => {
+      const s = rolledBackStudents.find((st) => st.id === ps.id);
+      if (s) {
+        const finalRp = s.rp + ps.delta;
+        const currentLabel = getFullTierLabel(finalRp, tierThresholds);
+        setPromotionEvent({
+          isPromoted: true,
+          newTier: currentLabel,
+          studentName: s.name
         });
+      }
+    });
 
-        // 5. Sync both updated datasets to Sheets in background
-        syncWithGoogleSheets(nextStudentsList, prevMatches.map((m) => m.id === matchId ? updatedMatch! : m), students, matches);
-        return nextStudentsList;
+    // 3. Construct the updated Match record
+    const updatedMatch: Match = {
+      ...match,
+      scoreA: nextScoreA,
+      scoreB: nextScoreB,
+      rpDeltaA: statA?.delta,
+      rpDeltaB: statB?.delta,
+      rpDeltaA2: statA2?.delta,
+      rpDeltaB2: statB2?.delta,
+      underdogBonusA: statA?.underdogBonus ?? 0,
+      underdogBonusB: statB?.underdogBonus ?? 0,
+      underdogBonusA2: statA2?.underdogBonus ?? 0,
+      underdogBonusB2: statB2?.underdogBonus ?? 0,
+      scoreDiffBonusA: statA?.scoreDiffBonus ?? 0,
+      scoreDiffBonusB: statB?.scoreDiffBonus ?? 0,
+      scoreDiffBonusA2: statA2?.scoreDiffBonus ?? 0,
+      scoreDiffBonusB2: statB2?.scoreDiffBonus ?? 0,
+      rivalBonusA: statA?.rivalBonus ?? 0,
+      rivalBonusB: statB?.rivalBonus ?? 0,
+      rivalBonusA2: statA2?.rivalBonus ?? 0,
+      rivalBonusB2: statB2?.rivalBonus ?? 0,
+      firstWinBonusA: statA?.firstWinBonus ?? 0,
+      firstWinBonusB: statB?.firstWinBonus ?? 0,
+      firstWinBonusA2: statA2?.firstWinBonus ?? 0,
+      firstWinBonusB2: statB2?.firstWinBonus ?? 0,
+      revengeBonusA: statA?.revengeBonus ?? 0,
+      revengeBonusB: statB?.revengeBonus ?? 0,
+      revengeBonusA2: statA2?.revengeBonus ?? 0,
+      revengeBonusB2: statB2?.revengeBonus ?? 0,
+    };
+
+    // 4. Update both students' stats with the new deltas
+    const nextStudentsList = rolledBackStudents.map((s) => {
+      if (!activePlayerIds.includes(s.id)) return s;
+
+      const pStat = playerStats.find((p) => p.id === s.id);
+      if (!pStat) return s;
+
+      const won = pStat.won;
+      const delta = pStat.delta;
+
+      const preRp = s.rp;
+      const preTier = getTier(preRp, tierThresholds);
+      const preTierRank = TIER_RANKING[preTier] ?? 1;
+
+      let nextRp = preRp + delta;
+      let nextShields = s.demotionShields ?? 0;
+
+      if (won) {
+        const tentativeTier = getTier(nextRp, tierThresholds);
+        const tentativeTierRank = TIER_RANKING[tentativeTier] ?? 1;
+        if (tentativeTierRank > preTierRank) {
+          nextShields = 3; // 승급 시 3회 완충
+        }
+        nextRp = Math.max(0, nextRp);
+      } else {
+        const minThreshold = tierThresholds[preTier] ?? 0;
+        if (nextRp < minThreshold && preTier !== "Bronze") {
+          if (nextShields >= 1) {
+            nextRp = minThreshold;
+            nextShields = nextShields - 1;
+          } else {
+            nextRp = Math.max(0, nextRp);
+          }
+        } else {
+          nextRp = Math.max(0, nextRp);
+        }
+      }
+
+      // Build new recent array
+      const tempMatches = matches.map((m) => m.id === matchId ? updatedMatch : m);
+      const sMatches = tempMatches
+        .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
+        .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
+        .slice(0, 5);
+
+      const newRecent = sMatches.map((m) => {
+        const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
+        const mAWon = m.scoreA > m.scoreB;
+        const mWon = mIsA ? mAWon : !mAWon;
+        return mWon ? "W" : "L";
       });
 
-      // 6. Update matches list
-      nextMatchesList = prevMatches.map((m) => m.id === matchId ? updatedMatch! : m);
-      return nextMatchesList;
+      return {
+        ...s,
+        rp: nextRp,
+        wins: s.wins + (won ? 1 : 0),
+        losses: s.losses + (won ? 0 : 1),
+        recent: newRecent,
+        demotionShields: nextShields,
+        lastMatchDate: new Date().toISOString(),
+        lastWinDate: won ? todayYmd : s.lastWinDate,
+      };
     });
+
+    const nextMatchesList = matches.map((m) => m.id === matchId ? updatedMatch : m);
+
+    setStudents(nextStudentsList);
+    setMatches(nextMatchesList);
+
+    // 5. Sync both updated datasets to Sheets in background
+    syncWithGoogleSheets(nextStudentsList, nextMatchesList, students, matches);
   }, [matches, students, tierThresholds, rpVariables, syncWithGoogleSheets]);
 
   // 리그 커스텀 설정 통합 저장 (마스터 DB 동기화 포함)
