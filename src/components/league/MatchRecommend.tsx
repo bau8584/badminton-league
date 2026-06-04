@@ -166,15 +166,23 @@ export function MatchRecommend({
 
     // ① Exclude opponents from the player's last 3 matches to prevent repeated matching
     const playerMatches = matches
-      .filter((m) => m.playerAId === player.id || m.playerBId === player.id)
+      .filter((m) => m.playerAId === player.id || m.playerBId === player.id || m.playerA2Id === player.id || m.playerB2Id === player.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 3);
 
     const excludedIds = new Set<string>();
     excludedIds.add(player.id); // Exclude self
     playerMatches.forEach((m) => {
-      if (m.playerAId === player.id) excludedIds.add(m.playerBId);
-      if (m.playerBId === player.id) excludedIds.add(m.playerAId);
+      const isOnTeamA = m.playerAId === player.id || m.playerA2Id === player.id;
+      const oppIds = isOnTeamA 
+        ? [m.playerBId, m.playerB2Id].filter(Boolean) as string[] 
+        : [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
+      oppIds.forEach(id => excludedIds.add(id));
+      
+      const partnerId = isOnTeamA 
+        ? (m.playerAId === player.id ? m.playerA2Id : m.playerAId)
+        : (m.playerBId === player.id ? m.playerB2Id : m.playerBId);
+      if (partnerId) excludedIds.add(partnerId);
     });
 
     // ② Primary filter by matching scope

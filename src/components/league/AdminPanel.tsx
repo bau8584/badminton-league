@@ -214,9 +214,13 @@ export function AdminPanel({
       return result.filter((m) => {
         const playerA = students.find((s) => s.id === m.playerAId);
         const playerB = students.find((s) => s.id === m.playerBId);
+        const playerA2 = m.playerA2Id ? students.find((s) => s.id === m.playerA2Id) : null;
+        const playerB2 = m.playerB2Id ? students.find((s) => s.id === m.playerB2Id) : null;
         return (
           (playerA && playerA.name.toLowerCase().includes(query)) ||
-          (playerB && playerB.name.toLowerCase().includes(query))
+          (playerB && playerB.name.toLowerCase().includes(query)) ||
+          (playerA2 && playerA2.name.toLowerCase().includes(query)) ||
+          (playerB2 && playerB2.name.toLowerCase().includes(query))
         );
       });
     }
@@ -271,8 +275,12 @@ export function AdminPanel({
           return result.filter((m) => {
             const playerA = students.find((s) => s.id === m.playerAId);
             const playerB = students.find((s) => s.id === m.playerBId);
-            const aMatch = playerA && playerA.grade === qGrade && playerA.classNum === qClass;
-            const bMatch = playerB && playerB.grade === qGrade && playerB.classNum === qClass;
+            const playerA2 = m.playerA2Id ? students.find((s) => s.id === m.playerA2Id) : null;
+            const playerB2 = m.playerB2Id ? students.find((s) => s.id === m.playerB2Id) : null;
+            const aMatch = (playerA && playerA.grade === qGrade && playerA.classNum === qClass) ||
+                           (playerA2 && playerA2.grade === qGrade && playerA2.classNum === qClass);
+            const bMatch = (playerB && playerB.grade === qGrade && playerB.classNum === qClass) ||
+                           (playerB2 && playerB2.grade === qGrade && playerB2.classNum === qClass);
             return aMatch || bMatch;
           });
         }
@@ -284,9 +292,13 @@ export function AdminPanel({
         return result.filter((m) => {
           const playerA = students.find((s) => s.id === m.playerAId);
           const playerB = students.find((s) => s.id === m.playerBId);
+          const playerA2 = m.playerA2Id ? students.find((s) => s.id === m.playerA2Id) : null;
+          const playerB2 = m.playerB2Id ? students.find((s) => s.id === m.playerB2Id) : null;
           return (
             (playerA && (playerA.grade === qNum || playerA.classNum === qNum)) ||
-            (playerB && (playerB.grade === qNum || playerB.classNum === qNum))
+            (playerB && (playerB.grade === qNum || playerB.classNum === qNum)) ||
+            (playerA2 && (playerA2.grade === qNum || playerA2.classNum === qNum)) ||
+            (playerB2 && (playerB2.grade === qNum || playerB2.classNum === qNum))
           );
         });
       }
@@ -295,9 +307,13 @@ export function AdminPanel({
       return result.filter((m) => {
         const playerA = students.find((s) => s.id === m.playerAId);
         const playerB = students.find((s) => s.id === m.playerBId);
+        const playerA2 = m.playerA2Id ? students.find((s) => s.id === m.playerA2Id) : null;
+        const playerB2 = m.playerB2Id ? students.find((s) => s.id === m.playerB2Id) : null;
         const aStr = playerA ? `${playerA.grade}-${playerA.classNum}` : "";
+        const a2Str = playerA2 ? `${playerA2.grade}-${playerA2.classNum}` : "";
         const bStr = playerB ? `${playerB.grade}-${playerB.classNum}` : "";
-        return aStr.includes(query) || bStr.includes(query);
+        const b2Str = playerB2 ? `${playerB2.grade}-${playerB2.classNum}` : "";
+        return aStr.includes(query) || a2Str.includes(query) || bStr.includes(query) || b2Str.includes(query);
       });
     }
 
@@ -1063,6 +1079,8 @@ export function AdminPanel({
                       number: 0,
                       gender: "U" as Gender
                     };
+                    const playerA2 = m.playerA2Id ? students.find((s) => s.id === m.playerA2Id) : null;
+                    const playerB2 = m.playerB2Id ? students.find((s) => s.id === m.playerB2Id) : null;
 
                     const aWon = m.scoreA > m.scoreB;
                     const matchDateStr = new Date(m.date).toLocaleString("ko-KR", {
@@ -1080,12 +1098,30 @@ export function AdminPanel({
                     if (m.underdogBonusA && m.underdogBonusA > 0) bonusesA.push(`🛡️ 언더독 (+${m.underdogBonusA})`);
                     if (m.scoreDiffBonusA && m.scoreDiffBonusA > 0) bonusesA.push(`🔥 압승 (+${m.scoreDiffBonusA})`);
 
+                    const bonusesA2 = [];
+                    if (playerA2) {
+                      if (m.rivalBonusA2 && m.rivalBonusA2 > 0) bonusesA2.push("⚔️ 라이벌 (+5)");
+                      if (m.firstWinBonusA2 && m.firstWinBonusA2 > 0) bonusesA2.push("🌟 첫승 (+15)");
+                      if (m.revengeBonusA2 && m.revengeBonusA2 > 0) bonusesA2.push("😈 복수 (+10)");
+                      if (m.underdogBonusA2 && m.underdogBonusA2 > 0) bonusesA2.push(`🛡️ 언더독 (+${m.underdogBonusA2})`);
+                      if (m.scoreDiffBonusA2 && m.scoreDiffBonusA2 > 0) bonusesA2.push(`🔥 압승 (+${m.scoreDiffBonusA2})`);
+                    }
+
                     const bonusesB = [];
                     if (m.rivalBonusB && m.rivalBonusB > 0) bonusesB.push("⚔️ 라이벌 (+5)");
                     if (m.firstWinBonusB && m.firstWinBonusB > 0) bonusesB.push("🌟 첫승 (+15)");
                     if (m.revengeBonusB && m.revengeBonusB > 0) bonusesB.push("😈 복수 (+10)");
                     if (m.underdogBonusB && m.underdogBonusB > 0) bonusesB.push(`🛡️ 언더독 (+${m.underdogBonusB})`);
                     if (m.scoreDiffBonusB && m.scoreDiffBonusB > 0) bonusesB.push(`🔥 압승 (+${m.scoreDiffBonusB})`);
+
+                    const bonusesB2 = [];
+                    if (playerB2) {
+                      if (m.rivalBonusB2 && m.rivalBonusB2 > 0) bonusesB2.push("⚔️ 라이벌 (+5)");
+                      if (m.firstWinBonusB2 && m.firstWinBonusB2 > 0) bonusesB2.push("🌟 첫승 (+15)");
+                      if (m.revengeBonusB2 && m.revengeBonusB2 > 0) bonusesB2.push("😈 복수 (+10)");
+                      if (m.underdogBonusB2 && m.underdogBonusB2 > 0) bonusesB2.push(`🛡️ 언더독 (+${m.underdogBonusB2})`);
+                      if (m.scoreDiffBonusB2 && m.scoreDiffBonusB2 > 0) bonusesB2.push(`🔥 압승 (+${m.scoreDiffBonusB2})`);
+                    }
 
                     return (
                       <tr key={m.id} className="border-b border-border/20 hover:bg-accent/10 transition-colors">
@@ -1094,10 +1130,19 @@ export function AdminPanel({
                         
                         {/* 2. Player A */}
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <GenderMark gender={playerA.gender} className="size-3.5 text-[9px]" />
-                            <span className={cn("font-bold", aWon && "text-neon-blue")}>{playerA.name}</span>
-                            <span className="text-[10px] text-muted-foreground">({playerA.grade}-{playerA.classNum})</span>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <GenderMark gender={playerA.gender} className="size-3.5 text-[9px]" />
+                              <span className={cn("font-bold", aWon && "text-neon-blue")}>{playerA.name}</span>
+                              <span className="text-[10px] text-muted-foreground">({playerA.grade}-{playerA.classNum})</span>
+                            </div>
+                            {playerA2 && (
+                              <div className="flex items-center gap-1.5 border-t border-border/10 pt-1">
+                                <GenderMark gender={playerA2.gender} className="size-3.5 text-[9px]" />
+                                <span className={cn("font-bold", aWon && "text-neon-blue")}>{playerA2.name}</span>
+                                <span className="text-[10px] text-muted-foreground">({playerA2.grade}-{playerA2.classNum})</span>
+                              </div>
+                            )}
                           </div>
                         </td>
 
@@ -1112,24 +1157,46 @@ export function AdminPanel({
 
                         {/* 4. Player B */}
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <GenderMark gender={playerB.gender} className="size-3.5 text-[9px]" />
-                            <span className={cn("font-bold", !aWon && "text-neon-blue")}>{playerB.name}</span>
-                            <span className="text-[10px] text-muted-foreground">({playerB.grade}-{playerB.classNum})</span>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <GenderMark gender={playerB.gender} className="size-3.5 text-[9px]" />
+                              <span className={cn("font-bold", !aWon && "text-neon-blue")}>{playerB.name}</span>
+                              <span className="text-[10px] text-muted-foreground">({playerB.grade}-{playerB.classNum})</span>
+                            </div>
+                            {playerB2 && (
+                              <div className="flex items-center gap-1.5 border-t border-border/10 pt-1">
+                                <GenderMark gender={playerB2.gender} className="size-3.5 text-[9px]" />
+                                <span className={cn("font-bold", !aWon && "text-neon-blue")}>{playerB2.name}</span>
+                                <span className="text-[10px] text-muted-foreground">({playerB2.grade}-{playerB2.classNum})</span>
+                              </div>
+                            )}
                           </div>
                         </td>
 
                         {/* 5. RP Deltas and Audited Bonuses */}
                         <td className="px-4 py-3 max-w-[240px] sm:max-w-xs md:max-w-md lg:max-w-lg">
                           <div className="space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={cn("font-mono font-bold text-[10px]", aWon ? "text-win" : "text-loss")}>
-                                {playerA.name}: {m.rpDeltaA !== undefined ? (m.rpDeltaA > 0 ? `+${m.rpDeltaA}` : m.rpDeltaA) : 0} RP
-                              </span>
-                              <span className="text-muted-foreground/45 text-[10px]">|</span>
-                              <span className={cn("font-mono font-bold text-[10px]", !aWon ? "text-win" : "text-loss")}>
-                                {playerB.name}: {m.rpDeltaB !== undefined ? (m.rpDeltaB > 0 ? `+${m.rpDeltaB}` : m.rpDeltaB) : 0} RP
-                              </span>
+                            <div className="flex flex-col gap-1 text-[10px]">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={cn("font-mono font-bold", aWon ? "text-win" : "text-loss")}>
+                                  {playerA.name}: {m.rpDeltaA !== undefined ? (m.rpDeltaA > 0 ? `+${m.rpDeltaA}` : m.rpDeltaA) : 0} RP
+                                </span>
+                                {playerA2 && (
+                                  <span className={cn("font-mono font-bold", aWon ? "text-win" : "text-loss")}>
+                                    & {playerA2.name}: {m.rpDeltaA2 !== undefined ? (m.rpDeltaA2 > 0 ? `+${m.rpDeltaA2}` : m.rpDeltaA2) : 0} RP
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={cn("font-mono font-bold", !aWon ? "text-win" : "text-loss")}>
+                                  {playerB.name}: {m.rpDeltaB !== undefined ? (m.rpDeltaB > 0 ? `+${m.rpDeltaB}` : m.rpDeltaB) : 0} RP
+                                </span>
+                                {playerB2 && (
+                                  <span className={cn("font-mono font-bold", !aWon ? "text-win" : "text-loss")}>
+                                    & {playerB2.name}: {m.rpDeltaB2 !== undefined ? (m.rpDeltaB2 > 0 ? `+${m.rpDeltaB2}` : m.rpDeltaB2) : 0} RP
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             {/* Render visual badges for bonuses A */}
@@ -1144,11 +1211,35 @@ export function AdminPanel({
                               </div>
                             )}
 
+                            {/* Render visual badges for bonuses A2 */}
+                            {bonusesA2.length > 0 && playerA2 && (
+                              <div className="flex items-center gap-1 flex-wrap mt-1">
+                                <span className="text-[9px] text-muted-foreground font-semibold shrink-0">{playerA2.name} 보상:</span>
+                                {bonusesA2.map((b, idx) => (
+                                  <span key={idx} className="bg-neon-blue/10 text-neon-blue border border-neon-blue/20 text-[8px] font-bold px-1.5 py-0.5 rounded">
+                                    {b}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
                             {/* Render visual badges for bonuses B */}
                             {bonusesB.length > 0 && (
                               <div className="flex items-center gap-1 flex-wrap mt-1">
                                 <span className="text-[9px] text-muted-foreground font-semibold shrink-0">{playerB.name} 보상:</span>
                                 {bonusesB.map((b, idx) => (
+                                  <span key={idx} className="bg-neon-blue/10 text-neon-blue border border-neon-blue/20 text-[8px] font-bold px-1.5 py-0.5 rounded">
+                                    {b}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Render visual badges for bonuses B2 */}
+                            {bonusesB2.length > 0 && playerB2 && (
+                              <div className="flex items-center gap-1 flex-wrap mt-1">
+                                <span className="text-[9px] text-muted-foreground font-semibold shrink-0">{playerB2.name} 보상:</span>
+                                {bonusesB2.map((b, idx) => (
                                   <span key={idx} className="bg-neon-blue/10 text-neon-blue border border-neon-blue/20 text-[8px] font-bold px-1.5 py-0.5 rounded">
                                     {b}
                                   </span>
@@ -1182,9 +1273,13 @@ export function AdminPanel({
                                 const deltaWinner = aWon ? (m.rpDeltaA !== undefined ? Math.abs(m.rpDeltaA) : 25) : (m.rpDeltaB !== undefined ? Math.abs(m.rpDeltaB) : 25);
                                 const deltaLoser = !aWon ? (m.rpDeltaA !== undefined ? Math.abs(m.rpDeltaA) : 20) : (m.rpDeltaB !== undefined ? Math.abs(m.rpDeltaB) : 20);
 
-                                if (window.confirm(`정말로 이 경기 기록(VS ${playerB.name})을 삭제하시겠습니까?\n\n두 학생의 RP가 경기 이전 상태로 완벽하게 롤백 복원됩니다.\n- ${playerA.name}: RP ${aWon ? "-" : "+"}${deltaWinner}\n- ${playerB.name}: RP ${!aWon ? "-" : "+"}${deltaLoser}`)) {
+                                const vsText = playerB2 ? `VS ${playerB.name} & ${playerB2.name}` : `VS ${playerB.name}`;
+                                const playersA = playerA2 ? `${playerA.name} & ${playerA2.name}` : playerA.name;
+                                const playersB = playerB2 ? `${playerB.name} & ${playerB2.name}` : playerB.name;
+
+                                if (window.confirm(`정말로 이 경기 기록(${vsText})을 삭제하시겠습니까?\n\n모든 참여 학생들의 RP가 경기 이전 상태로 완벽하게 롤백 복원됩니다.\n- ${playersA}: RP ${aWon ? "-" : "+"}${deltaWinner}\n- ${playersB}: RP ${!aWon ? "-" : "+"}${deltaLoser}`)) {
                                   onDeleteMatch(m.id);
-                                  toast.success("경기 기록이 완벽히 삭제되었으며 두 학생의 RP 및 전적이 경기 이전으로 롤백 복구되었습니다!");
+                                  toast.success("경기 기록이 완벽히 삭제되었으며 참여 학생들의 RP 및 전적이 경기 이전으로 롤백 복구되었습니다!");
                                 }
                               }}
                               variant="ghost"

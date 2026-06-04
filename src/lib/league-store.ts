@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import type { Student, Match, Gender, TierName } from "./league-types";
 import { studentKey, getTier, getTierSubdivision, getFullTierLabel, TIER_ORDER } from "./league-types";
+import { toast } from "sonner";
 
 export type Achievement = {
   id: string;
@@ -37,6 +38,7 @@ const BONUSES_KEY = "bdm.bonuses.v1";
 
 // 세션 영속 저장을 위한 로컬스토리지 키
 const SESSION_KEY = "bdm.session.v1";
+const OP_MODE_KEY = "bdm.opMode.v1";
 
 // 마스터 DB 구글 Apps Script Web App API 주소
 const MASTER_API_URL = "https://script.google.com/macros/s/AKfycbzcu1d1T8pHvzwvcPn2qPFIg8YtCQxsspvfQ6Koa-ie6wWE9UhEvtPzurK92SVeJEMvyQ/exec";
@@ -151,6 +153,7 @@ export function useLeagueStore() {
 
   // 3대 역할 로그인 세션 상태
   const [session, setSession] = useState<UserSession>(null);
+  const [opMode, setOpMode] = useState<"school" | "club">("school");
 
   // 이중 보안 모달을 위한 선생님 비밀번호(접근 코드) 전역 관리
   const [teacherAccessCode, setTeacherAccessCode] = useState<string>(() => {
@@ -179,31 +182,114 @@ export function useLeagueStore() {
     rival: true
   });
 
-  const [promotionEvent, setPromotionEvent] = useState<{ isPromoted: boolean; newTier: string } | null>(null);
+  const [promotionQueue, setPromotionQueue] = useState<{ isPromoted: boolean; newTier: string; studentName?: string }[]>([]);
+  const promotionEvent = promotionQueue[0] || null;
+  const setPromotionEvent = useCallback((event: { isPromoted: boolean; newTier: string; studentName?: string } | null) => {
+    if (event === null) {
+      setPromotionQueue((prev) => prev.slice(1));
+    } else {
+      setPromotionQueue((prev) => [...prev, event]);
+    }
+  }, []);
 
   // 1. 구글 스프레드시트 데이터베이스 전체 일괄 동기화 (POST)
-  const syncWithGoogleSheets = useCallback(async (currentStudents: Student[], currentMatches: Match[]) => {
+  const syncWithGoogleSheets = useCallback(async (
+    currentStudents: Student[], 
+    currentMatches: Match[],
+    previousStudents?: Student[],
+    previousMatches?: Match[]
+  ) => {
     // 세션에 개인 scriptUrl이 없으면 동기화 생략 (로컬 저장만 적용 - 게스트 모드 포함)
     if (!session || !session.scriptUrl) return;
     setIsSyncing(true);
-    try {
-      await fetch(session.scriptUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain;charset=utf-8",
-        },
-        body: JSON.stringify({
-          action: "SYNC_ALL",
-          students: currentStudents,
-          matches: currentMatches
-        })
+
+    const performSync = async (): Promise<{ success: boolean; isCongested: boolean }> => {
+      try {
+        const res = await fetch(session.scriptUrl!, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8",
+          },
+          body: JSON.stringify({
+            action: "SYNC_ALL",
+            students: currentStudents,
+            matches: currentMatches
+          })
+        });
+
+        if (res.status === 429 || res.status === 503) {
+          return { success: false, isCongested: true };
+        }
+
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {}
+
+        if (data && data.status === "error" && data.message && (data.message.includes("혼잡") || data.message.includes("busy"))) {
+          return { success: false, isCongested: true };
+        }
+
+        if (data && data.status === "success") {
+          return { success: true, isCongested: false };
+        }
+
+        return { success: false, isCongested: false };
+      } catch (error) {
+        console.error("Synchronization attempt failed:", error);
+        return { success: false, isCongested: false };
+      }
+    };
+
+    // 1차 시도
+    let result = await performSync();
+
+    // 락 획득 실패 등으로 혼잡한 경우 3초 대기 후 자동으로 2차 시도 (재시도)
+    if (!result.success && result.isCongested) {
+      toast.warning("다른 사용자가 기록을 입력 중입니다. 3초 후 다시 시도합니다...", {
+        id: "sync-lock-retry",
+        duration: 3000
       });
-      console.log("Successfully synced all league data to tenant Google Sheets!");
-    } catch (error) {
-      console.error("Failed to sync database to Google Sheets:", error);
-    } finally {
-      setIsSyncing(false);
+
+      // 3초 대기
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      // 2차 시도 (재시도)
+      result = await performSync();
+      
+      if (result.success) {
+        toast.success("기록이 성공적으로 저장되었습니다.", { id: "sync-lock-success" });
+      }
     }
+
+    if (!result.success) {
+      if (result.isCongested) {
+        toast.error("다른 사용자가 기록을 입력 중입니다. 3초 후 다시 시도해주세요.", {
+          id: "sync-lock-error",
+          duration: 5000
+        });
+      } else {
+        toast.error("서버 동기화에 실패했습니다. 네트워크 상태를 확인해주세요.", {
+          id: "sync-error",
+          duration: 5000
+        });
+      }
+
+      // 동기화 실패 시 입력을 취소하기 위해 이전 상태로 롤백
+      if (previousStudents) {
+        setStudents(previousStudents);
+        saveJSON(STUDENTS_KEY, previousStudents);
+      }
+      if (previousMatches) {
+        setMatches(previousMatches);
+        saveJSON(MATCHES_KEY, previousMatches);
+      }
+    } else {
+      console.log("Successfully synced all league data to tenant Google Sheets!");
+    }
+
+    setIsSyncing(false);
   }, [session]);
 
   // 2. 로그인 수행 함수 (간편 로그인 시스템 도입 - 이메일/PW 제거, 동명이인 방지 추가)
@@ -246,7 +332,7 @@ export function useLeagueStore() {
         let schoolScriptUrl = "";
         try {
           let teachers = await getTeachersList();
-          const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
+          const normalizeSchool = (name: string) => name.replace(/(초등학교|중학교|고등학교|초등|중등|고등|학교|초|클럽|동호회|회)$/, "").trim().toLowerCase();
           const targetSchool = normalizeSchool(cleanedSchool);
           let matchedTeacher = teachers.find(
             (t: any) => 
@@ -264,8 +350,23 @@ export function useLeagueStore() {
             );
           }
 
-          if (matchedTeacher && matchedTeacher.scriptUrl) {
-            schoolScriptUrl = matchedTeacher.scriptUrl;
+          if (matchedTeacher) {
+            if (matchedTeacher.scriptUrl) {
+              schoolScriptUrl = matchedTeacher.scriptUrl;
+            }
+            if (matchedTeacher.settingsBonus) {
+              try {
+                const parsed = typeof matchedTeacher.settingsBonus === "string"
+                  ? JSON.parse(matchedTeacher.settingsBonus)
+                  : matchedTeacher.settingsBonus;
+                if (parsed && parsed.opMode) {
+                  setOpMode(parsed.opMode);
+                  saveJSON(OP_MODE_KEY, parsed.opMode);
+                }
+              } catch (e) {
+                console.warn("Failed to parse settingsBonus from matched teacher:", e);
+              }
+            }
           }
         } catch (err) {
           console.warn("Failed to retrieve matching school scriptUrl for student:", err);
@@ -277,9 +378,15 @@ export function useLeagueStore() {
             const res = await fetch(schoolScriptUrl);
             const remoteData = await res.json();
             if (remoteData.status === "success" && remoteData.students) {
-              activeStudents = remoteData.students;
-              setStudents(remoteData.students);
-              saveJSON(STUDENTS_KEY, remoteData.students);
+              const mappedStudents = remoteData.students.map((s: any) => ({
+                ...s,
+                grade: s.grade ? Number(s.grade) : 0,
+                classNum: s.classNum ? Number(s.classNum) : 0,
+                number: s.number ? Number(s.number) : 0
+              }));
+              activeStudents = mappedStudents;
+              setStudents(mappedStudents);
+              saveJSON(STUDENTS_KEY, mappedStudents);
               if (remoteData.matches) {
                 setMatches(remoteData.matches);
                 saveJSON(MATCHES_KEY, remoteData.matches);
@@ -295,10 +402,15 @@ export function useLeagueStore() {
           activeStudents = loadJSON<Student[]>(STUDENTS_KEY, isGuest ? SEED_STUDENTS : []);
         }
 
+        // Get currently active opMode (either state or cached fallback)
+        const currentOpMode = localStorage.getItem(OP_MODE_KEY) || opMode;
+
         const matchStudent = activeStudents.find((s) => 
           s.name === cleanedCode && 
-          (studentGrade === undefined || s.grade === studentGrade) &&
-          (studentClass === undefined || s.classNum === studentClass)
+          (currentOpMode === "club" || (
+            (studentGrade === undefined || s.grade === studentGrade) &&
+            (studentClass === undefined || s.classNum === studentClass)
+          ))
         );
 
         if (matchStudent) {
@@ -314,7 +426,10 @@ export function useLeagueStore() {
           saveJSON(SESSION_KEY, studentSession);
           return { success: true };
         } else {
-          return { success: false, message: `${cleanedSchool} 명단에 '${studentGrade}학년 ${studentClass}반 ${cleanedCode}' 학생이 존재하지 않습니다. 교사에게 문의하세요.` };
+          const msg = currentOpMode === "club"
+            ? `${cleanedSchool} 명단에 '${cleanedCode}' 선수가 존재하지 않습니다. 관리자에게 문의하세요.`
+            : `${cleanedSchool} 명단에 '${studentGrade}학년 ${studentClass}반 ${cleanedCode}' 학생이 존재하지 않습니다. 교사에게 문의하세요.`;
+          return { success: false, message: msg };
         }
       }
 
@@ -325,7 +440,7 @@ export function useLeagueStore() {
         // 교사의 경우, 학교명 입력이 단축어 또는 실제 schoolName 혹은 loginId 에 해당하는지 마스터 교사 목록에서 조회하여 실제 ID 매핑
         try {
           let teachers = await getTeachersList();
-          const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
+          const normalizeSchool = (name: string) => name.replace(/(초등학교|중학교|고등학교|초등|중등|고등|학교|초|클럽|동호회|회)$/, "").trim().toLowerCase();
           const targetSchool = normalizeSchool(cleanedSchool);
           let matchedTeacher = teachers.find(
             (t: any) => 
@@ -363,9 +478,18 @@ export function useLeagueStore() {
           role
         })
       });
-      const data = await response.json();
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {}
+
+      if (data && data.status === "error" && data.message && data.message.includes("혼잡")) {
+        toast.error("다른 사용자가 로그인/등록 중입니다. 3초 후 다시 시도해주세요.", { id: "login-lock-error" });
+        return { success: false, message: "다른 사용자가 로그인/등록 중입니다. 3초 후 다시 시도해주세요." };
+      }
       
-      if (data.status === "success" && data.user) {
+      if (data && data.status === "success" && data.user) {
         setSession(data.user);
         saveJSON(SESSION_KEY, data.user);
         if (role === "TEACHER" || role === "MASTER") {
@@ -383,6 +507,10 @@ export function useLeagueStore() {
               ? JSON.parse(data.user.settingsBonus) 
               : data.user.settingsBonus;
             setActiveBonuses(parsed);
+            if (parsed && parsed.opMode) {
+              setOpMode(parsed.opMode);
+              saveJSON(OP_MODE_KEY, parsed.opMode);
+            }
             saveJSON(BONUSES_KEY, parsed);
           } catch (e) {
             console.error("Failed parsing settingsBonus from login response:", e);
@@ -395,7 +523,12 @@ export function useLeagueStore() {
             const remoteRes = await fetch(data.user.scriptUrl);
             const remoteData = await remoteRes.json();
             if (remoteData.status === "success") {
-              const fetchedStudents = remoteData.students || [];
+              const fetchedStudents = (remoteData.students || []).map((s: any) => ({
+                ...s,
+                grade: s.grade ? Number(s.grade) : 0,
+                classNum: s.classNum ? Number(s.classNum) : 0,
+                number: s.number ? Number(s.number) : 0
+              }));
               setStudents(fetchedStudents);
               saveJSON(STUDENTS_KEY, fetchedStudents);
               const fetchedMatches = remoteData.matches || [];
@@ -486,7 +619,7 @@ export function useLeagueStore() {
               const teachersRes = await fetch(`${MASTER_API_URL}?action=GET_TEACHERS`);
               const teachersData = await teachersRes.json();
               if (teachersData.status === "success" && teachersData.teachers) {
-                const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
+                const normalizeSchool = (name: string) => name.replace(/(초등학교|중학교|고등학교|초등|중등|고등|학교|초|클럽|동호회|회)$/, "").trim().toLowerCase();
                 const targetSchool = normalizeSchool(cleanedSchool);
                 const matchedTeacher = teachersData.teachers.find(
                   (t: any) => 
@@ -521,7 +654,12 @@ export function useLeagueStore() {
                 const remoteRes = await fetch(schoolScriptUrl);
                 const remoteData = await remoteRes.json();
                 if (remoteData.status === "success") {
-                  const fetchedStudents = remoteData.students || [];
+                  const fetchedStudents = (remoteData.students || []).map((s: any) => ({
+                    ...s,
+                    grade: s.grade ? Number(s.grade) : 0,
+                    classNum: s.classNum ? Number(s.classNum) : 0,
+                    number: s.number ? Number(s.number) : 0
+                  }));
                   setStudents(fetchedStudents);
                   saveJSON(STUDENTS_KEY, fetchedStudents);
                   const fetchedMatches = remoteData.matches || [];
@@ -624,11 +762,21 @@ export function useLeagueStore() {
           ...details
         })
       });
-      const data = await response.json();
-      if (data.status === "success") {
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {}
+
+      if (data && data.status === "error" && data.message && data.message.includes("혼잡")) {
+        toast.error("다른 사용자가 로그인/등록 중입니다. 3초 후 다시 시도해주세요.", { id: "register-lock-error" });
+        return { success: false, message: "다른 사용자가 로그인/등록 중입니다. 3초 후 다시 시도해주세요." };
+      }
+
+      if (data && data.status === "success") {
         return { success: true, message: data.message };
       } else {
-        return { success: false, message: data.message || "가입 처리에 실패했습니다." };
+        return { success: false, message: (data && data.message) || "가입 처리에 실패했습니다." };
       }
     } catch (error) {
       console.error("Registration request failed:", error);
@@ -653,11 +801,21 @@ export function useLeagueStore() {
           email: email.trim()
         })
       });
-      const data = await response.json();
-      if (data.status === "success") {
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {}
+
+      if (data && data.status === "error" && data.message && data.message.includes("혼잡")) {
+        toast.error("다른 사용자가 요청 중입니다. 3초 후 다시 시도해주세요.", { id: "recover-lock-error" });
+        return { success: false, message: "다른 사용자가 요청 중입니다. 3초 후 다시 시도해주세요." };
+      }
+
+      if (data && data.status === "success") {
         return { success: true, message: data.message || "비밀번호가 이메일로 자동 발송되었습니다." };
       } else {
-        return { success: false, message: data.message || "해당 정보와 일치하는 계정을 찾을 수 없습니다." };
+        return { success: false, message: (data && data.message) || "해당 정보와 일치하는 계정을 찾을 수 없습니다." };
       }
     } catch (error) {
       console.error("Password recovery request failed:", error);
@@ -712,11 +870,14 @@ export function useLeagueStore() {
       setIsLocked(localLocked);
 
       // 설정 로드
-      const localSettings = loadJSON<{ thresholds: Record<TierName, number>; rpVars: { winDelta: number; loseDelta: number } } | null>(SETTINGS_KEY, null);
+      const localSettings = loadJSON<{ thresholds: Record<TierName, number>; rpVars: { winDelta: number; loseDelta: number }; opMode?: "school" | "club" } | null>(SETTINGS_KEY, null);
       if (localSettings) {
         if (localSettings.thresholds) setTierThresholds(localSettings.thresholds);
         if (localSettings.rpVars) setRpVariables(localSettings.rpVars);
+        if (localSettings.opMode) setOpMode(localSettings.opMode);
       }
+      const cachedOpMode = localStorage.getItem(OP_MODE_KEY) as "school" | "club" | null;
+      if (cachedOpMode) setOpMode(cachedOpMode);
 
       // 보너스 활성화 로드
       const localBonuses = loadJSON<ActiveBonuses | null>(BONUSES_KEY, null);
@@ -735,6 +896,10 @@ export function useLeagueStore() {
               ? JSON.parse(cachedSession.settingsBonus) 
               : cachedSession.settingsBonus;
             setActiveBonuses(parsed);
+            if (parsed && parsed.opMode) {
+              setOpMode(parsed.opMode);
+              localStorage.setItem(OP_MODE_KEY, parsed.opMode);
+            }
           } catch (e) {
             console.error("Failed to parse cached session bonuses:", e);
           }
@@ -756,7 +921,7 @@ export function useLeagueStore() {
             if (!loginIdToVerify && cachedSession.role === "TEACHER") {
               try {
                 const teachers = await getTeachersList();
-                const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
+                const normalizeSchool = (name: string) => name.replace(/(초등학교|중학교|고등학교|초등|중등|고등|학교|초|클럽|동호회|회)$/, "").trim().toLowerCase();
                 const targetSchool = normalizeSchool(cachedSession.schoolName);
                 const matchedTeacher = teachers.find(
                   (t: any) => 
@@ -813,8 +978,14 @@ export function useLeagueStore() {
             const data = await response.json();
             if (data.status === "success") {
               if (data.students) {
-                setStudents(data.students);
-                saveJSON(STUDENTS_KEY, data.students);
+                const mappedStudents = data.students.map((s: any) => ({
+                  ...s,
+                  grade: s.grade ? Number(s.grade) : 0,
+                  classNum: s.classNum ? Number(s.classNum) : 0,
+                  number: s.number ? Number(s.number) : 0
+                }));
+                setStudents(mappedStudents);
+                saveJSON(STUDENTS_KEY, mappedStudents);
               }
               if (data.matches) {
                 setMatches(data.matches);
@@ -824,14 +995,18 @@ export function useLeagueStore() {
                 setTitle(data.leagueName);
                 saveJSON(TITLE_KEY, data.leagueName);
               }
-              if (data.settingsBonus) {
-                try {
-                  const parsed = typeof data.settingsBonus === "string" 
-                    ? JSON.parse(data.settingsBonus) 
-                    : data.settingsBonus;
-                  setActiveBonuses(parsed);
-                  saveJSON(BONUSES_KEY, parsed);
-                } catch (e) {
+               if (data.settingsBonus) {
+                 try {
+                   const parsed = typeof data.settingsBonus === "string" 
+                     ? JSON.parse(data.settingsBonus) 
+                     : data.settingsBonus;
+                   setActiveBonuses(parsed);
+                   if (parsed && parsed.opMode) {
+                     setOpMode(parsed.opMode);
+                     localStorage.setItem(OP_MODE_KEY, parsed.opMode);
+                   }
+                   saveJSON(BONUSES_KEY, parsed);
+                 } catch (e) {
                   console.error("Failed parsing settingsBonus from remote GET:", e);
                 }
               }
@@ -857,8 +1032,16 @@ export function useLeagueStore() {
   useEffect(() => { if (hydrated) saveJSON(SETTINGS_KEY, { thresholds: tierThresholds, rpVars: rpVariables }); }, [tierThresholds, rpVariables, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(BONUSES_KEY, activeBonuses); }, [activeBonuses, hydrated]);
 
-  // 경기 기록 및 동기화 (언더독 & 점수차 & 라이벌 & 첫승 & 복수전 누적 보상 적용)
-  const recordMatch = useCallback((playerAId: string, playerBId: string, scoreA: number, scoreB: number) => {
+  // 경기 기록 및 동기화 (단식/복식 지원, 개별 보너스 연산 적용)
+  const recordMatch = useCallback((
+    playerAId: string, 
+    playerBId: string, 
+    scoreA: number, 
+    scoreB: number,
+    playerA2Id?: string,
+    playerB2Id?: string,
+    matchType: "single" | "double" = "single"
+  ) => {
     if (playerAId === playerBId) return;
     const aWon = scoreA > scoreB;
 
@@ -866,114 +1049,183 @@ export function useLeagueStore() {
     const playerB = students.find((s) => s.id === playerBId);
     if (!playerA || !playerB) return;
 
-    const preRpA = playerA.rp;
-    const preRpB = playerB.rp;
-
-    const winnerId = aWon ? playerAId : playerBId;
-    const loserId = aWon ? playerBId : playerAId;
-    const winnerPlayer = aWon ? playerA : playerB;
-    const loserPlayer = aWon ? playerB : playerA;
-
-    // 1. 언더독 보너스 (N RP: 자신보다 높은 티어를 이겼을 때 점수 차의 10% 지급)
-    let underdogBonus = 0;
-    const winPrevRp = winnerPlayer.rp;
-    const losePrevRp = loserPlayer.rp;
-    if (activeBonuses.underdog && winPrevRp < losePrevRp) {
-      const winTier = getTier(winPrevRp, tierThresholds);
-      const loseTier = getTier(losePrevRp, tierThresholds);
-      const winTierRank = TIER_RANKING[winTier] ?? 1;
-      const loseTierRank = TIER_RANKING[loseTier] ?? 1;
-      if (winTierRank < loseTierRank) {
-        underdogBonus = Math.max(0, Math.floor((losePrevRp - winPrevRp) * 0.1));
-      }
-    }
-
-    // 2. 점수차 비례 보상 (압승 보너스: 경기 점수 차이 1점당 1점 추가 지급)
-    let scoreDiffBonus = 0;
-    if (activeBonuses.scoreDiff) {
-      scoreDiffBonus = Math.abs(scoreA - scoreB);
-    }
-
-    // 3. 라이벌 매치 보너스 (+5 RP: RP 차이가 20점 이하)
-    let rivalBonus = 0;
-    if (activeBonuses.rival) {
-      const rpDiff = Math.abs(preRpA - preRpB);
-      rivalBonus = rpDiff <= 20 ? 5 : 0;
-    }
-
     // 오늘의 날짜 구하기 (로컬 타임존 반영)
     const today = new Date();
     const offset = today.getTimezoneOffset();
     const localToday = new Date(today.getTime() - (offset * 60 * 1000));
     const todayYmd = localToday.toISOString().split("T")[0];
 
-    // 4. 오늘의 첫 승 보너스 (+15 RP)
-    let firstWinBonus = 0;
-    if (activeBonuses.firstWin) {
-      firstWinBonus = winnerPlayer.lastWinDate !== todayYmd ? 15 : 0;
-    }
+    // 복식/단식 참가 플레이어 목록 빌드
+    const activePlayers = [
+      { id: playerAId, role: "A" as const, isA: true },
+      { id: playerA2Id, role: "A2" as const, isA: true },
+      { id: playerBId, role: "B" as const, isA: false },
+      { id: playerB2Id, role: "B2" as const, isA: false }
+    ].filter((p) => p.id !== undefined && p.id !== "") as { id: string; role: "A" | "A2" | "B" | "B2"; isA: boolean }[];
 
-    // 5. 복수전 성공 보너스 (+10 RP)
-    let revengeBonus = 0;
-    if (activeBonuses.revenge) {
-      const hasPastLoss = matches.some((m) => {
-        const isCurrentWinnerA = m.playerAId === winnerId && m.playerBId === loserId;
-        const isCurrentWinnerB = m.playerBId === winnerId && m.playerAId === loserId;
-        if (isCurrentWinnerA) return m.scoreB > m.scoreA; // winner lost to loser
-        if (isCurrentWinnerB) return m.scoreA > m.scoreB; // winner lost to loser
-        return false;
-      });
-      revengeBonus = hasPastLoss ? 10 : 0;
-    }
+    // 각 참가 학생별로 개별 RP 변동 및 보너스 계산
+    const playerStats = activePlayers.map((p) => {
+      const student = students.find((s) => s.id === p.id);
+      if (!student) return null;
 
-    // 6. 최종 변동 RP 계산 (누적 합산 방식)
-    const winDeltaTotal = rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus;
-    const loseDeltaTotal = -rpVariables.loseDelta; // 패자 보호: 감점 방어
+      const won = p.isA ? aWon : !aWon;
+      const oppIds = p.isA 
+        ? [playerBId, playerB2Id].filter(Boolean) as string[] 
+        : [playerAId, playerA2Id].filter(Boolean) as string[];
+      const opponents = students.filter((s) => oppIds.includes(s.id));
 
-    const deltaA = aWon ? winDeltaTotal : loseDeltaTotal;
-    const deltaB = aWon ? loseDeltaTotal : winDeltaTotal;
+      let underdogBonus = 0;
+      let scoreDiffBonus = 0;
+      let rivalBonus = 0;
+      let firstWinBonus = 0;
+      let revengeBonus = 0;
 
-    // 실시간 승급 효과 감지
-    const winnerDelta = aWon ? deltaA : deltaB;
-    const winFinalRp = winPrevRp + winnerDelta;
-    const winPrevTier = getTier(winPrevRp, tierThresholds);
-    const winFinalTier = getTier(winFinalRp, tierThresholds);
-    const winPrevSub = getTierSubdivision(winPrevRp, tierThresholds);
-    const winFinalSub = getTierSubdivision(winFinalRp, tierThresholds);
+      if (won) {
+        if (activeBonuses.underdog && opponents.length > 0) {
+          const playerTier = getTier(student.rp, tierThresholds);
+          const playerTierRank = TIER_RANKING[playerTier] ?? 1;
+          const maxOppRp = Math.max(...opponents.map((o) => o.rp));
+          const maxOppTier = getTier(maxOppRp, tierThresholds);
+          const maxOppTierRank = TIER_RANKING[maxOppTier] ?? 1;
+          if (playerTierRank < maxOppTierRank) {
+            underdogBonus = Math.max(0, Math.floor((maxOppRp - student.rp) * 0.1));
+          }
+        }
 
-    const basePromoted = TIER_ORDER.indexOf(winFinalTier) < TIER_ORDER.indexOf(winPrevTier);
-    const subPromoted = winFinalTier === winPrevTier && winFinalSub < winPrevSub;
-    const isPromoted = basePromoted || subPromoted;
+        if (activeBonuses.scoreDiff) {
+          scoreDiffBonus = Math.abs(scoreA - scoreB);
+        }
 
-    if (isPromoted) {
-      const currentLabel = getFullTierLabel(winFinalRp, tierThresholds);
-      setPromotionEvent({
-        isPromoted: true,
-        newTier: currentLabel,
-        studentName: winnerPlayer.name
-      });
-    }
+        if (activeBonuses.rival) {
+          rivalBonus = opponents.some((o) => Math.abs(student.rp - o.rp) <= 20) ? 5 : 0;
+        }
+
+        if (activeBonuses.firstWin) {
+          firstWinBonus = student.lastWinDate !== todayYmd ? 15 : 0;
+        }
+
+        if (activeBonuses.revenge) {
+          const hasPastLoss = matches.some((m) => {
+            const mTeamA = [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
+            const mTeamB = [m.playerBId, m.playerB2Id].filter(Boolean) as string[];
+            const mAWon = m.scoreA > m.scoreB;
+            
+            const sIsOnA = mTeamA.includes(student.id);
+            const sIsOnB = mTeamB.includes(student.id);
+            
+            if (sIsOnA) {
+              const lost = !mAWon;
+              const facedAnyOpp = mTeamB.some((oppId) => oppIds.includes(oppId));
+              return lost && facedAnyOpp;
+            }
+            if (sIsOnB) {
+              const lost = mAWon;
+              const facedAnyOpp = mTeamA.some((oppId) => oppIds.includes(oppId));
+              return lost && facedAnyOpp;
+            }
+            return false;
+          });
+          revengeBonus = hasPastLoss ? 10 : 0;
+        }
+      }
+
+      const delta = won 
+        ? (rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus)
+        : -rpVariables.loseDelta;
+
+      return {
+        id: student.id,
+        role: p.role,
+        isA: p.isA,
+        won,
+        delta,
+        underdogBonus,
+        scoreDiffBonus,
+        rivalBonus,
+        firstWinBonus,
+        revengeBonus
+      };
+    }).filter(Boolean) as {
+      id: string;
+      role: "A" | "A2" | "B" | "B2";
+      isA: boolean;
+      won: boolean;
+      delta: number;
+      underdogBonus: number;
+      scoreDiffBonus: number;
+      rivalBonus: number;
+      firstWinBonus: number;
+      revengeBonus: number;
+    }[];
+
+    const statA = playerStats.find((p) => p.role === "A");
+    const statB = playerStats.find((p) => p.role === "B");
+    const statA2 = playerStats.find((p) => p.role === "A2");
+    const statB2 = playerStats.find((p) => p.role === "B2");
+
+    // 승리팀 중 실시간 승급 효과 감지 (복식 지원으로 여러 명 동시 승급 가능)
+    const promotedPlayers = playerStats.filter((ps) => {
+      if (!ps.won) return false;
+      const s = students.find((st) => st.id === ps.id);
+      if (!s) return false;
+      const finalRp = s.rp + ps.delta;
+      const prevTier = getTier(s.rp, tierThresholds);
+      const finalTier = getTier(finalRp, tierThresholds);
+      const prevSub = getTierSubdivision(s.rp, tierThresholds);
+      const finalSub = getTierSubdivision(finalRp, tierThresholds);
+      
+      const basePromoted = TIER_ORDER.indexOf(finalTier) < TIER_ORDER.indexOf(prevTier);
+      const subPromoted = finalTier === prevTier && finalSub < prevSub;
+      return basePromoted || subPromoted;
+    });
+
+    promotedPlayers.forEach((ps) => {
+      const s = students.find((st) => st.id === ps.id);
+      if (s) {
+        const finalRp = s.rp + ps.delta;
+        const currentLabel = getFullTierLabel(finalRp, tierThresholds);
+        setPromotionEvent({
+          isPromoted: true,
+          newTier: currentLabel,
+          studentName: s.name
+        });
+      }
+    });
 
     const match: Match = { 
       id: uid(), 
       playerAId, 
       playerBId, 
+      playerA2Id,
+      playerB2Id,
       scoreA, 
       scoreB, 
       date: new Date().toISOString(),
-      rpDeltaA: deltaA,
-      rpDeltaB: deltaB,
-      // Store individual bonus stats to audit & display in UI
-      underdogBonusA: aWon ? underdogBonus : 0,
-      underdogBonusB: !aWon ? underdogBonus : 0,
-      scoreDiffBonusA: aWon ? scoreDiffBonus : 0,
-      scoreDiffBonusB: !aWon ? scoreDiffBonus : 0,
-      rivalBonusA: aWon ? rivalBonus : 0,
-      rivalBonusB: !aWon ? rivalBonus : 0,
-      firstWinBonusA: aWon ? firstWinBonus : 0,
-      firstWinBonusB: !aWon ? firstWinBonus : 0,
-      revengeBonusA: aWon ? revengeBonus : 0,
-      revengeBonusB: !aWon ? revengeBonus : 0,
+      matchType,
+      rpDeltaA: statA?.delta,
+      rpDeltaB: statB?.delta,
+      rpDeltaA2: statA2?.delta,
+      rpDeltaB2: statB2?.delta,
+      underdogBonusA: statA?.underdogBonus,
+      underdogBonusB: statB?.underdogBonus,
+      underdogBonusA2: statA2?.underdogBonus,
+      underdogBonusB2: statB2?.underdogBonus,
+      scoreDiffBonusA: statA?.scoreDiffBonus,
+      scoreDiffBonusB: statB?.scoreDiffBonus,
+      scoreDiffBonusA2: statA2?.scoreDiffBonus,
+      scoreDiffBonusB2: statB2?.scoreDiffBonus,
+      rivalBonusA: statA?.rivalBonus,
+      rivalBonusB: statB?.rivalBonus,
+      rivalBonusA2: statA2?.rivalBonus,
+      rivalBonusB2: statB2?.rivalBonus,
+      firstWinBonusA: statA?.firstWinBonus,
+      firstWinBonusB: statB?.firstWinBonus,
+      firstWinBonusA2: statA2?.firstWinBonus,
+      firstWinBonusB2: statB2?.firstWinBonus,
+      revengeBonusA: statA?.revengeBonus,
+      revengeBonusB: statB?.revengeBonus,
+      revengeBonusA2: statA2?.revengeBonus,
+      revengeBonusB2: statB2?.revengeBonus,
     };
     
     let nextMatches: Match[] = [];
@@ -984,10 +1236,11 @@ export function useLeagueStore() {
 
     setStudents((prev) => {
       const nextStudents = prev.map((s) => {
-        if (s.id !== playerAId && s.id !== playerBId) return s;
-        const isA = s.id === playerAId;
-        const won = isA ? aWon : !aWon;
-        const delta = isA ? deltaA : deltaB;
+        const pStat = playerStats.find((p) => p.id === s.id);
+        if (!pStat) return s;
+
+        const won = pStat.won;
+        const delta = pStat.delta;
 
         const preRp = s.rp;
         const preTier = getTier(preRp, tierThresholds);
@@ -1007,7 +1260,7 @@ export function useLeagueStore() {
           const minThreshold = tierThresholds[preTier] ?? 0;
           if (nextRp < minThreshold && preTier !== "Bronze") {
             if (nextShields >= 1) {
-              nextRp = minThreshold; // 강등 방어막 가동 (티어 최하단선으로 락인)
+              nextRp = minThreshold; // 강등 방어막 가동
               nextShields = nextShields - 1;
             } else {
               nextRp = Math.max(0, nextRp); // 방어막이 소진되어 강등
@@ -1025,11 +1278,11 @@ export function useLeagueStore() {
           recent: [(won ? "W" : "L") as "W" | "L", ...s.recent].slice(0, 5),
           demotionShields: nextShields,
           lastMatchDate: new Date().toISOString(),
-          lastWinDate: won ? todayYmd : s.lastWinDate, // 승리 시 lastWinDate 갱신
+          lastWinDate: won ? todayYmd : s.lastWinDate,
         };
       });
 
-      syncWithGoogleSheets(nextStudents, nextMatches);
+      syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
       return nextStudents;
     });
 
@@ -1047,31 +1300,39 @@ export function useLeagueStore() {
       setStudents((prevStudents) => {
         const playerAId = match.playerAId;
         const playerBId = match.playerBId;
+        const playerA2Id = match.playerA2Id;
+        const playerB2Id = match.playerB2Id;
         const aWon = match.scoreA > match.scoreB;
 
-        const nextStudents = prevStudents.map((s) => {
-          if (s.id !== playerAId && s.id !== playerBId) return s;
+        const activePlayerIds = [playerAId, playerBId, playerA2Id, playerB2Id].filter(Boolean) as string[];
 
-          const isA = s.id === playerAId;
-          const won = isA ? aWon : !aWon;
+        const nextStudents = prevStudents.map((s) => {
+          if (!activePlayerIds.includes(s.id)) return s;
+
+          const isTeamA = s.id === playerAId || s.id === playerA2Id;
+          const won = isTeamA ? aWon : !aWon;
           
           let rpDelta = 0;
-          if (isA) {
+          if (s.id === playerAId) {
             rpDelta = match.rpDeltaA !== undefined ? -match.rpDeltaA : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
-          } else {
+          } else if (s.id === playerBId) {
             rpDelta = match.rpDeltaB !== undefined ? -match.rpDeltaB : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+          } else if (s.id === playerA2Id) {
+            rpDelta = match.rpDeltaA2 !== undefined ? -match.rpDeltaA2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+          } else if (s.id === playerB2Id) {
+            rpDelta = match.rpDeltaB2 !== undefined ? -match.rpDeltaB2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
           }
           const newRp = Math.max(0, s.rp + rpDelta);
           const newWins = Math.max(0, s.wins - (won ? 1 : 0));
           const newLosses = Math.max(0, s.losses - (won ? 0 : 1));
 
           const sMatches = nextMatches
-            .filter((m) => m.playerAId === s.id || m.playerBId === s.id)
+            .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
             .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
             .slice(0, 5);
 
           const newRecent = sMatches.map((m) => {
-            const mIsA = m.playerAId === s.id;
+            const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
             const mAWon = m.scoreA > m.scoreB;
             const mWon = mIsA ? mAWon : !mAWon;
             return mWon ? "W" : "L";
@@ -1086,25 +1347,35 @@ export function useLeagueStore() {
           };
         });
 
-        syncWithGoogleSheets(nextStudents, nextMatches);
+        syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
         return nextStudents;
       });
 
       return nextMatches;
     });
-  }, [syncWithGoogleSheets, rpVariables]);
+  }, [students, matches, syncWithGoogleSheets, rpVariables]);
 
   // 개별 학생 전적 리셋 및 동기화
   const resetStudent = useCallback((studentId: string) => {
     setMatches((prevMatches) => {
       const nextMatches = prevMatches.filter(
-        (m) => m.playerAId !== studentId && m.playerBId !== studentId
+        (m) => m.playerAId !== studentId && m.playerBId !== studentId && m.playerA2Id !== studentId && m.playerB2Id !== studentId
       );
 
       const playedOpponents = new Set<string>();
       prevMatches.forEach((m) => {
-        if (m.playerAId === studentId) playedOpponents.add(m.playerBId);
-        if (m.playerBId === studentId) playedOpponents.add(m.playerAId);
+        if (m.playerAId === studentId || m.playerA2Id === studentId) {
+          if (m.playerBId) playedOpponents.add(m.playerBId);
+          if (m.playerB2Id) playedOpponents.add(m.playerB2Id);
+          const partnerId = m.playerAId === studentId ? m.playerA2Id : m.playerAId;
+          if (partnerId) playedOpponents.add(partnerId);
+        }
+        if (m.playerBId === studentId || m.playerB2Id === studentId) {
+          if (m.playerAId) playedOpponents.add(m.playerAId);
+          if (m.playerA2Id) playedOpponents.add(m.playerA2Id);
+          const partnerId = m.playerBId === studentId ? m.playerB2Id : m.playerBId;
+          if (partnerId) playedOpponents.add(partnerId);
+        }
       });
 
       setStudents((prevStudents) => {
@@ -1121,12 +1392,12 @@ export function useLeagueStore() {
 
           if (playedOpponents.has(s.id)) {
             const sMatches = nextMatches
-              .filter((m) => m.playerAId === s.id || m.playerBId === s.id)
+              .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
               .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
               .slice(0, 5);
 
             const newRecent = sMatches.map((m) => {
-              const mIsA = m.playerAId === s.id;
+              const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
               const mAWon = m.scoreA > m.scoreB;
               const mWon = mIsA ? mAWon : !mAWon;
               return mWon ? "W" : "L";
@@ -1141,13 +1412,13 @@ export function useLeagueStore() {
           return s;
         });
 
-        syncWithGoogleSheets(nextStudents, nextMatches);
+        syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
         return nextStudents;
       });
 
       return nextMatches;
     });
-  }, [syncWithGoogleSheets]);
+  }, [students, matches, syncWithGoogleSheets]);
 
   // 시즌 전체 초기화 및 동기화
   const resetAllData = useCallback(() => {
@@ -1163,10 +1434,10 @@ export function useLeagueStore() {
         recent: [],
       }));
 
-      syncWithGoogleSheets(nextStudents, nextMatches);
+      syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
       return nextStudents;
     });
-  }, [syncWithGoogleSheets]);
+  }, [students, matches, syncWithGoogleSheets]);
 
   // 교사 관리자 수동 RP 수정 및 동기화
   const updateStudentRP = useCallback((studentId: string, nextRp: number) => {
@@ -1179,10 +1450,10 @@ export function useLeagueStore() {
         };
       });
 
-      syncWithGoogleSheets(nextStudents, matches);
+      syncWithGoogleSheets(nextStudents, matches, students, matches);
       return nextStudents;
     });
-  }, [matches, syncWithGoogleSheets]);
+  }, [students, matches, syncWithGoogleSheets]);
 
   // 새로운 명렬표 대량 업서트 및 동기화
   const upsertStudents = useCallback(
@@ -1225,13 +1496,13 @@ export function useLeagueStore() {
         }
         targetStudents = next;
         
-        syncWithGoogleSheets(targetStudents, matches);
+        syncWithGoogleSheets(targetStudents, matches, students, matches);
         return next;
       });
 
       return { added, kept };
     },
-    [matches, syncWithGoogleSheets],
+    [students, matches, syncWithGoogleSheets],
   );
 
   // 리그전 커스텀 설정 캘리브레이션 업데이트 함수
@@ -1247,39 +1518,59 @@ export function useLeagueStore() {
         if (s.id !== studentId) return s;
         return { ...s, gender };
       });
-      syncWithGoogleSheets(nextStudents, matches);
+      syncWithGoogleSheets(nextStudents, matches, students, matches);
       return nextStudents;
     });
-  }, [matches, syncWithGoogleSheets]);
+  }, [students, matches, syncWithGoogleSheets]);
 
   // 개별 학생 삭제 및 연쇄 삭제 & 전적 복구 롤백
   const deleteStudent = useCallback((studentId: string) => {
     setMatches((prevMatches) => {
-      const matchesToRemove = prevMatches.filter((m) => m.playerAId === studentId || m.playerBId === studentId);
-      const nextMatches = prevMatches.filter((m) => m.playerAId !== studentId && m.playerBId !== studentId);
+      const matchesToRemove = prevMatches.filter((m) => m.playerAId === studentId || m.playerBId === studentId || m.playerA2Id === studentId || m.playerB2Id === studentId);
+      const nextMatches = prevMatches.filter((m) => m.playerAId !== studentId && m.playerBId !== studentId && m.playerA2Id !== studentId && m.playerB2Id !== studentId);
 
       setStudents((prevStudents) => {
         // 1. 삭제할 학생 제외
         let nextStudents = prevStudents.filter((s) => s.id !== studentId);
 
-        // 2. 삭제되는 경기들의 상대방 전적 복구
+        // 2. 삭제되는 경기들의 상대방 & 아군 파트너 전적 복구
         matchesToRemove.forEach((m) => {
-          const opponentId = m.playerAId === studentId ? m.playerBId : m.playerAId;
-          const isOpponentA = m.playerAId === opponentId;
-          const oppWon = isOpponentA ? (m.scoreA > m.scoreB) : (m.scoreB > m.scoreA);
+          const aWon = m.scoreA > m.scoreB;
+          const isPlayerA = m.playerAId === studentId || m.playerA2Id === studentId;
+          
+          const partnerId = isPlayerA 
+            ? (m.playerAId === studentId ? m.playerA2Id : m.playerAId) 
+            : (m.playerBId === studentId ? m.playerB2Id : m.playerBId);
+            
+          const oppIds = isPlayerA 
+            ? [m.playerBId, m.playerB2Id].filter(Boolean) as string[] 
+            : [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
+
+          const affectedPlayers = [
+            ...oppIds.map(id => ({ id, isOpponent: true })),
+            partnerId ? { id: partnerId, isOpponent: false } : null
+          ].filter(Boolean) as { id: string; isOpponent: boolean }[];
 
           nextStudents = nextStudents.map((s) => {
-            if (s.id !== opponentId) return s;
-            
+            const affected = affectedPlayers.find(ap => ap.id === s.id);
+            if (!affected) return s;
+
             let rpDelta = 0;
-            if (isOpponentA) {
-              rpDelta = m.rpDeltaA !== undefined ? -m.rpDeltaA : (oppWon ? -rpVariables.winDelta : rpVariables.loseDelta);
-            } else {
-              rpDelta = m.rpDeltaB !== undefined ? -m.rpDeltaB : (oppWon ? -rpVariables.winDelta : rpVariables.loseDelta);
+            const won = affected.isOpponent ? !isPlayerA : isPlayerA;
+            
+            if (s.id === m.playerAId) {
+              rpDelta = m.rpDeltaA !== undefined ? -m.rpDeltaA : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+            } else if (s.id === m.playerBId) {
+              rpDelta = m.rpDeltaB !== undefined ? -m.rpDeltaB : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+            } else if (s.id === m.playerA2Id) {
+              rpDelta = m.rpDeltaA2 !== undefined ? -m.rpDeltaA2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
+            } else if (s.id === m.playerB2Id) {
+              rpDelta = m.rpDeltaB2 !== undefined ? -m.rpDeltaB2 : (won ? -rpVariables.winDelta : rpVariables.loseDelta);
             }
+
             const newRp = Math.max(0, s.rp + rpDelta);
-            const newWins = Math.max(0, s.wins - (oppWon ? 1 : 0));
-            const newLosses = Math.max(0, s.losses - (oppWon ? 0 : 1));
+            const newWins = Math.max(0, s.wins - (won ? 1 : 0));
+            const newLosses = Math.max(0, s.losses - (won ? 0 : 1));
 
             return {
               ...s,
@@ -1293,12 +1584,12 @@ export function useLeagueStore() {
         // 3. 상대방들의 recent 배열 재구성
         nextStudents = nextStudents.map((s) => {
           const sMatches = nextMatches
-            .filter((m) => m.playerAId === s.id || m.playerBId === s.id)
+            .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
             .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
             .slice(0, 5);
 
           const newRecent = sMatches.map((m) => {
-            const mIsA = m.playerAId === s.id;
+            const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
             const mAWon = m.scoreA > m.scoreB;
             const mWon = mIsA ? mAWon : !mAWon;
             return mWon ? "W" : "L";
@@ -1310,13 +1601,13 @@ export function useLeagueStore() {
           };
         });
 
-        syncWithGoogleSheets(nextStudents, nextMatches);
+        syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
         return nextStudents;
       });
 
       return nextMatches;
     });
-  }, [syncWithGoogleSheets, rpVariables]);
+  }, [students, matches, syncWithGoogleSheets, rpVariables]);
 
   // CSV 롤백 복원 액션
   const restoreFromCSV = useCallback((restoredStudents: Student[], restoredMatches: Match[]) => {
@@ -1324,8 +1615,8 @@ export function useLeagueStore() {
     setMatches(restoredMatches);
     saveJSON(STUDENTS_KEY, restoredStudents);
     saveJSON(MATCHES_KEY, restoredMatches);
-    syncWithGoogleSheets(restoredStudents, restoredMatches);
-  }, [syncWithGoogleSheets]);
+    syncWithGoogleSheets(restoredStudents, restoredMatches, students, matches);
+  }, [students, matches, syncWithGoogleSheets]);
 
   // 교사 통제형 휴면 강등 일괄 RP 차감 액션
   const bulkDecayRP = useCallback((inactiveDays: number, decayAmount: number) => {
@@ -1356,13 +1647,13 @@ export function useLeagueStore() {
       });
 
       if (affectedCount > 0) {
-        syncWithGoogleSheets(nextStudents, matches);
+        syncWithGoogleSheets(nextStudents, matches, students, matches);
       }
       return nextStudents;
     });
 
     return affectedCount;
-  }, [matches, tierThresholds, syncWithGoogleSheets]);
+  }, [students, matches, tierThresholds, syncWithGoogleSheets]);
 
   // 경기 점수 수정 및 보너스/RP 완벽 재계산 액션
   const updateMatchScore = useCallback((matchId: string, nextScoreA: number, nextScoreB: number) => {
@@ -1376,18 +1667,30 @@ export function useLeagueStore() {
 
       const playerAId = match.playerAId;
       const playerBId = match.playerBId;
+      const playerA2Id = match.playerA2Id;
+      const playerB2Id = match.playerB2Id;
+      
       const oldAWon = match.scoreA > match.scoreB;
       const oldRpDeltaA = match.rpDeltaA ?? 0;
       const oldRpDeltaB = match.rpDeltaB ?? 0;
+      const oldRpDeltaA2 = match.rpDeltaA2 ?? 0;
+      const oldRpDeltaB2 = match.rpDeltaB2 ?? 0;
 
-      // 1. Rollback old match stats for both students to get their "pre-match" state
+      // 1. Rollback old match stats for all active students to get their "pre-match" state
       setStudents((prevStudents) => {
-        const rolledBackStudents = prevStudents.map((s) => {
-          if (s.id !== playerAId && s.id !== playerBId) return s;
+        const activePlayerIds = [playerAId, playerBId, playerA2Id, playerB2Id].filter(Boolean) as string[];
 
-          const isA = s.id === playerAId;
-          const oldWon = isA ? oldAWon : !oldAWon;
-          const oldDelta = isA ? oldRpDeltaA : oldRpDeltaB;
+        const rolledBackStudents = prevStudents.map((s) => {
+          if (!activePlayerIds.includes(s.id)) return s;
+
+          const isTeamA = s.id === playerAId || s.id === playerA2Id;
+          const oldWon = isTeamA ? oldAWon : !oldAWon;
+          
+          let oldDelta = 0;
+          if (s.id === playerAId) oldDelta = oldRpDeltaA;
+          else if (s.id === playerBId) oldDelta = oldRpDeltaB;
+          else if (s.id === playerA2Id) oldDelta = oldRpDeltaA2;
+          else if (s.id === playerB2Id) oldDelta = oldRpDeltaB2;
 
           // Rollback wins, losses, RP
           const newRp = Math.max(0, s.rp - oldDelta);
@@ -1403,121 +1706,189 @@ export function useLeagueStore() {
         });
 
         // 2. Perform recalculation using the rolled back students
-        const playerA = rolledBackStudents.find((s) => s.id === playerAId)!;
-        const playerB = rolledBackStudents.find((s) => s.id === playerBId)!;
-
         const aWon = nextScoreA > nextScoreB;
-        const winnerId = aWon ? playerAId : playerBId;
-        const loserId = aWon ? playerBId : playerAId;
-        const winnerPlayer = aWon ? playerA : playerB;
-        const loserPlayer = aWon ? playerB : playerA;
+        
+        const activePlayers = [
+          { id: playerAId, role: "A" as const, isA: true },
+          { id: playerA2Id, role: "A2" as const, isA: true },
+          { id: playerBId, role: "B" as const, isA: false },
+          { id: playerB2Id, role: "B2" as const, isA: false }
+        ].filter((p) => p.id !== undefined && p.id !== "") as { id: string; role: "A" | "A2" | "B" | "B2"; isA: boolean }[];
 
-        // A. Underdog bonus (N RP: 자신보다 높은 티어를 이겼을 때 점수 차의 10% 지급)
-        let underdogBonus = 0;
-        if (activeBonuses.underdog && winnerPlayer.rp < loserPlayer.rp) {
-          const winTier = getTier(winnerPlayer.rp, tierThresholds);
-          const loseTier = getTier(loserPlayer.rp, tierThresholds);
-          const winTierRank = TIER_RANKING[winTier] ?? 1;
-          const loseTierRank = TIER_RANKING[loseTier] ?? 1;
-          if (winTierRank < loseTierRank) {
-            underdogBonus = Math.max(0, Math.floor((loserPlayer.rp - winnerPlayer.rp) * 0.1));
-          }
-        }
-
-        // B. Score difference bonus (압승 보너스: 경기 점수 차이 1점당 1점 추가 지급)
-        let scoreDiffBonus = 0;
-        if (activeBonuses.scoreDiff) {
-          scoreDiffBonus = Math.abs(nextScoreA - nextScoreB);
-        }
-
-        // C. Rival bonus (+5 RP: RP 차이가 20점 이하)
-        let rivalBonus = 0;
-        if (activeBonuses.rival) {
-          const rpDiff = Math.abs(playerA.rp - playerB.rp);
-          rivalBonus = rpDiff <= 20 ? 5 : 0;
-        }
-
-        // 오늘의 날짜 구하기 (로컬 타임존 반영)
         const today = new Date();
         const offset = today.getTimezoneOffset();
         const localToday = new Date(today.getTime() - (offset * 60 * 1000));
         const todayYmd = localToday.toISOString().split("T")[0];
 
-        // D. Daily first win bonus (+15 RP)
-        let firstWinBonus = 0;
-        if (activeBonuses.firstWin) {
-          firstWinBonus = winnerPlayer.lastWinDate !== todayYmd ? 15 : 0;
-        }
+        const playerStats = activePlayers.map((p) => {
+          const student = rolledBackStudents.find((s) => s.id === p.id);
+          if (!student) return null;
 
-        // E. Revenge bonus (+10 RP)
-        let revengeBonus = 0;
-        if (activeBonuses.revenge) {
-          const pastMatches = prevMatches.filter((m) => m.id !== matchId);
-          const hasPastLoss = pastMatches.some((m) => {
-            const isCurrentWinnerA = m.playerAId === winnerId && m.playerBId === loserId;
-            const isCurrentWinnerB = m.playerBId === winnerId && m.playerAId === loserId;
-            if (isCurrentWinnerA) return m.scoreB > m.scoreA;
-            if (isCurrentWinnerB) return m.scoreA > m.scoreB;
-            return false;
-          });
-          revengeBonus = hasPastLoss ? 10 : 0;
-        }
+          const won = p.isA ? aWon : !aWon;
+          const oppIds = p.isA 
+            ? [playerBId, playerB2Id].filter(Boolean) as string[] 
+            : [playerAId, playerA2Id].filter(Boolean) as string[];
+          const opponents = rolledBackStudents.filter((s) => oppIds.includes(s.id));
 
-        // F. Consolidated RP Deltas
-        const winDeltaTotal = rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus;
-        const loseDeltaTotal = -rpVariables.loseDelta;
+          let underdogBonus = 0;
+          let scoreDiffBonus = 0;
+          let rivalBonus = 0;
+          let firstWinBonus = 0;
+          let revengeBonus = 0;
 
-        const deltaA = aWon ? winDeltaTotal : loseDeltaTotal;
-        const deltaB = aWon ? loseDeltaTotal : winDeltaTotal;
+          if (won) {
+            if (activeBonuses.underdog && opponents.length > 0) {
+              const playerTier = getTier(student.rp, tierThresholds);
+              const playerTierRank = TIER_RANKING[playerTier] ?? 1;
+              const maxOppRp = Math.max(...opponents.map((o) => o.rp));
+              const maxOppTier = getTier(maxOppRp, tierThresholds);
+              const maxOppTierRank = TIER_RANKING[maxOppTier] ?? 1;
+              if (playerTierRank < maxOppTierRank) {
+                underdogBonus = Math.max(0, Math.floor((maxOppRp - student.rp) * 0.1));
+              }
+            }
 
-        // 실시간 승급 효과 감지
-        const winnerDelta = aWon ? deltaA : deltaB;
-        const winPrevRp = winnerPlayer.rp;
-        const winFinalRp = winPrevRp + winnerDelta;
-        const winPrevTier = getTier(winPrevRp, tierThresholds);
-        const winFinalTier = getTier(winFinalRp, tierThresholds);
-        const winPrevSub = getTierSubdivision(winPrevRp, tierThresholds);
-        const winFinalSub = getTierSubdivision(winFinalRp, tierThresholds);
+            if (activeBonuses.scoreDiff) {
+              scoreDiffBonus = Math.abs(nextScoreA - nextScoreB);
+            }
 
-        const basePromoted = TIER_ORDER.indexOf(winFinalTier) < TIER_ORDER.indexOf(winPrevTier);
-        const subPromoted = winFinalTier === winPrevTier && winFinalSub < winPrevSub;
-        const isPromoted = basePromoted || subPromoted;
+            if (activeBonuses.rival) {
+              rivalBonus = opponents.some((o) => Math.abs(student.rp - o.rp) <= 20) ? 5 : 0;
+            }
 
-        if (isPromoted) {
-          const currentLabel = getFullTierLabel(winFinalRp, tierThresholds);
-          setPromotionEvent({
-            isPromoted: true,
-            newTier: currentLabel,
-            studentName: winnerPlayer.name
-          });
-        }
+            if (activeBonuses.firstWin) {
+              firstWinBonus = student.lastWinDate !== todayYmd ? 15 : 0;
+            }
+
+            if (activeBonuses.revenge) {
+              const pastMatches = prevMatches.filter((m) => m.id !== matchId);
+              const hasPastLoss = pastMatches.some((m) => {
+                const mTeamA = [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
+                const mTeamB = [m.playerBId, m.playerB2Id].filter(Boolean) as string[];
+                const mAWon = m.scoreA > m.scoreB;
+                
+                const sIsOnA = mTeamA.includes(student.id);
+                const sIsOnB = mTeamB.includes(student.id);
+                
+                if (sIsOnA) {
+                  const lost = !mAWon;
+                  const facedAnyOpp = mTeamB.some((oppId) => oppIds.includes(oppId));
+                  return lost && facedAnyOpp;
+                }
+                if (sIsOnB) {
+                  const lost = mAWon;
+                  const facedAnyOpp = mTeamA.some((oppId) => oppIds.includes(oppId));
+                  return lost && facedAnyOpp;
+                }
+                return false;
+              });
+              revengeBonus = hasPastLoss ? 10 : 0;
+            }
+          }
+
+          const delta = won 
+            ? (rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus)
+            : -rpVariables.loseDelta;
+
+          return {
+            id: student.id,
+            role: p.role,
+            isA: p.isA,
+            won,
+            delta,
+            underdogBonus,
+            scoreDiffBonus,
+            rivalBonus,
+            firstWinBonus,
+            revengeBonus
+          };
+        }).filter(Boolean) as {
+          id: string;
+          role: "A" | "A2" | "B" | "B2";
+          isA: boolean;
+          won: boolean;
+          delta: number;
+          underdogBonus: number;
+          scoreDiffBonus: number;
+          rivalBonus: number;
+          firstWinBonus: number;
+          revengeBonus: number;
+        }[];
+
+        const statA = playerStats.find((p) => p.role === "A");
+        const statB = playerStats.find((p) => p.role === "B");
+        const statA2 = playerStats.find((p) => p.role === "A2");
+        const statB2 = playerStats.find((p) => p.role === "B2");
+
+        // 승리팀 중 실시간 승급 효과 감지 (복식 지원으로 여러 명 동시 승급 가능)
+        const promotedPlayers = playerStats.filter((ps) => {
+          if (!ps.won) return false;
+          const s = rolledBackStudents.find((st) => st.id === ps.id);
+          if (!s) return false;
+          const finalRp = s.rp + ps.delta;
+          const prevTier = getTier(s.rp, tierThresholds);
+          const finalTier = getTier(finalRp, tierThresholds);
+          const prevSub = getTierSubdivision(s.rp, tierThresholds);
+          const finalSub = getTierSubdivision(finalRp, tierThresholds);
+          
+          const basePromoted = TIER_ORDER.indexOf(finalTier) < TIER_ORDER.indexOf(prevTier);
+          const subPromoted = finalTier === prevTier && finalSub < prevSub;
+          return basePromoted || subPromoted;
+        });
+
+        promotedPlayers.forEach((ps) => {
+          const s = rolledBackStudents.find((st) => st.id === ps.id);
+          if (s) {
+            const finalRp = s.rp + ps.delta;
+            const currentLabel = getFullTierLabel(finalRp, tierThresholds);
+            setPromotionEvent({
+              isPromoted: true,
+              newTier: currentLabel,
+              studentName: s.name
+            });
+          }
+        });
 
         // 3. Construct the updated Match record
         updatedMatch = {
           ...match,
           scoreA: nextScoreA,
           scoreB: nextScoreB,
-          rpDeltaA: deltaA,
-          rpDeltaB: deltaB,
-          underdogBonusA: aWon ? underdogBonus : 0,
-          underdogBonusB: !aWon ? underdogBonus : 0,
-          scoreDiffBonusA: aWon ? scoreDiffBonus : 0,
-          scoreDiffBonusB: !aWon ? scoreDiffBonus : 0,
-          rivalBonusA: aWon ? rivalBonus : 0,
-          rivalBonusB: !aWon ? rivalBonus : 0,
-          firstWinBonusA: aWon ? firstWinBonus : 0,
-          firstWinBonusB: !aWon ? firstWinBonus : 0,
-          revengeBonusA: aWon ? revengeBonus : 0,
-          revengeBonusB: !aWon ? revengeBonus : 0,
+          rpDeltaA: statA?.delta,
+          rpDeltaB: statB?.delta,
+          rpDeltaA2: statA2?.delta,
+          rpDeltaB2: statB2?.delta,
+          underdogBonusA: statA?.underdogBonus ?? 0,
+          underdogBonusB: statB?.underdogBonus ?? 0,
+          underdogBonusA2: statA2?.underdogBonus ?? 0,
+          underdogBonusB2: statB2?.underdogBonus ?? 0,
+          scoreDiffBonusA: statA?.scoreDiffBonus ?? 0,
+          scoreDiffBonusB: statB?.scoreDiffBonus ?? 0,
+          scoreDiffBonusA2: statA2?.scoreDiffBonus ?? 0,
+          scoreDiffBonusB2: statB2?.scoreDiffBonus ?? 0,
+          rivalBonusA: statA?.rivalBonus ?? 0,
+          rivalBonusB: statB?.rivalBonus ?? 0,
+          rivalBonusA2: statA2?.rivalBonus ?? 0,
+          rivalBonusB2: statB2?.rivalBonus ?? 0,
+          firstWinBonusA: statA?.firstWinBonus ?? 0,
+          firstWinBonusB: statB?.firstWinBonus ?? 0,
+          firstWinBonusA2: statA2?.firstWinBonus ?? 0,
+          firstWinBonusB2: statB2?.firstWinBonus ?? 0,
+          revengeBonusA: statA?.revengeBonus ?? 0,
+          revengeBonusB: statB?.revengeBonus ?? 0,
+          revengeBonusA2: statA2?.revengeBonus ?? 0,
+          revengeBonusB2: statB2?.revengeBonus ?? 0,
         };
 
         // 4. Update both students' stats with the new deltas
         nextStudentsList = rolledBackStudents.map((s) => {
-          if (s.id !== playerAId && s.id !== playerBId) return s;
+          if (!activePlayerIds.includes(s.id)) return s;
 
-          const isA = s.id === playerAId;
-          const won = isA ? aWon : !aWon;
-          const delta = isA ? deltaA : deltaB;
+          const pStat = playerStats.find((p) => p.id === s.id);
+          if (!pStat) return s;
+
+          const won = pStat.won;
+          const delta = pStat.delta;
 
           const preRp = s.rp;
           const preTier = getTier(preRp, tierThresholds);
@@ -1550,12 +1921,12 @@ export function useLeagueStore() {
           // Build new recent array
           const tempMatches = prevMatches.map((m) => m.id === matchId ? updatedMatch! : m);
           const sMatches = tempMatches
-            .filter((m) => m.playerAId === s.id || m.playerBId === s.id)
+            .filter((m) => m.playerAId === s.id || m.playerBId === s.id || m.playerA2Id === s.id || m.playerB2Id === s.id)
             .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
             .slice(0, 5);
 
           const newRecent = sMatches.map((m) => {
-            const mIsA = m.playerAId === s.id;
+            const mIsA = m.playerAId === s.id || m.playerA2Id === s.id;
             const mAWon = m.scoreA > m.scoreB;
             const mWon = mIsA ? mAWon : !mAWon;
             return mWon ? "W" : "L";
@@ -1574,7 +1945,7 @@ export function useLeagueStore() {
         });
 
         // 5. Sync both updated datasets to Sheets in background
-        syncWithGoogleSheets(nextStudentsList, prevMatches.map((m) => m.id === matchId ? updatedMatch! : m));
+        syncWithGoogleSheets(nextStudentsList, prevMatches.map((m) => m.id === matchId ? updatedMatch! : m), students, matches);
         return nextStudentsList;
       });
 
@@ -1585,17 +1956,24 @@ export function useLeagueStore() {
   }, [matches, students, tierThresholds, rpVariables, syncWithGoogleSheets]);
 
   // 리그 커스텀 설정 통합 저장 (마스터 DB 동기화 포함)
-  const saveLeagueSettings = useCallback(async (newTitle: string, newBonuses: ActiveBonuses) => {
+  const saveLeagueSettings = useCallback(async (newTitle: string, newBonuses: ActiveBonuses, newOpMode?: "school" | "club") => {
+    const targetOpMode = newOpMode !== undefined ? newOpMode : opMode;
     setTitle(newTitle);
     setActiveBonuses(newBonuses);
+    setOpMode(targetOpMode);
     saveJSON(TITLE_KEY, newTitle);
     saveJSON(BONUSES_KEY, newBonuses);
+    localStorage.setItem(OP_MODE_KEY, targetOpMode);
 
     if (session) {
+      const settingsPayload = {
+        ...newBonuses,
+        opMode: targetOpMode
+      };
       const updatedSession = {
         ...session,
         leagueName: newTitle,
-        settingsBonus: newBonuses
+        settingsBonus: settingsPayload
       };
       setSession(updatedSession);
       saveJSON(SESSION_KEY, updatedSession);
@@ -1613,10 +1991,19 @@ export function useLeagueStore() {
             role: session.role,
             schoolName: session.schoolName,
             leagueName: newTitle,
-            settingsBonus: JSON.stringify(newBonuses)
+            settingsBonus: JSON.stringify(settingsPayload)
           })
         });
-        const data = await res.json();
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {}
+
+        if (data && data.status === "error" && data.message && data.message.includes("혼잡")) {
+          toast.error("다른 사용자가 설정을 수정 중입니다. 3초 후 다시 시도해주세요.", { id: "settings-lock-error" });
+          return;
+        }
         console.log("Updated league settings on Google Sheets:", data);
       } catch (err) {
         console.warn("Failed to sync settings to Google Sheets MASTER row. Kept locally.", err);
@@ -1624,16 +2011,37 @@ export function useLeagueStore() {
         setIsSyncing(false);
       }
     }
-  }, [session]);
+  }, [session, opMode]);
+
+  // 학교/클럽의 운영 모드 조회 헬퍼
+  const getSchoolMode = useCallback(async (school: string): Promise<"school" | "club"> => {
+    try {
+      const teachers = await getTeachersList();
+      const normalize = (name: string) => name.replace(/(초등학교|중학교|고등학교|초등|중등|고등|학교|초|클럽|동호회|회)$/, "").trim().toLowerCase();
+      const target = normalize(school);
+      const matched = teachers.find(
+        (t: any) => 
+          normalize(t.schoolName) === target || 
+          normalize(t.loginId) === target
+      );
+      if (matched && matched.settingsBonus) {
+        const parsed = typeof matched.settingsBonus === "string" ? JSON.parse(matched.settingsBonus) : matched.settingsBonus;
+        if (parsed && parsed.opMode) return parsed.opMode;
+      }
+    } catch (e) {
+      console.warn("Failed checking school mode:", e);
+    }
+    return "school";
+  }, []);
 
   // 학생용 '나의 업적' 자동 연산 함수 (Derived State)
   const calculateAchievements = useCallback((studentId: string): Achievement[] => {
     const student = students.find((s) => s.id === studentId);
     if (!student) return [];
 
-    // 해당 학생이 참여한 모든 경기 필터링
+    // 해당 학생이 참여한 모든 경기 필터링 (단식 및 복식 파트너 참여분 포함)
     const studentMatches = matches.filter(
-      (m) => m.playerAId === studentId || m.playerBId === studentId
+      (m) => m.playerAId === studentId || m.playerBId === studentId || m.playerA2Id === studentId || m.playerB2Id === studentId
     );
 
     // 경기 기록 시간순 정렬 (과거에서 최신순)
@@ -1643,7 +2051,7 @@ export function useLeagueStore() {
 
     const totalGames = studentMatches.length;
     const totalLosses = chronologicalMatches.filter((m) => {
-      const isPlayerA = m.playerAId === studentId;
+      const isPlayerA = m.playerAId === studentId || m.playerA2Id === studentId;
       const aWon = m.scoreA > m.scoreB;
       const won = isPlayerA ? aWon : !aWon;
       return !won;
@@ -1657,7 +2065,7 @@ export function useLeagueStore() {
     let brokeLossStreakOf4Plus = false;
 
     chronologicalMatches.forEach((m) => {
-      const isPlayerA = m.playerAId === studentId;
+      const isPlayerA = m.playerAId === studentId || m.playerA2Id === studentId;
       const aWon = m.scoreA > m.scoreB;
       const won = isPlayerA ? aWon : !aWon;
 
@@ -1682,17 +2090,25 @@ export function useLeagueStore() {
     // 자신보다 높은 티어와 대결한 횟수 (승패 무관)
     let higherTierCount = 0;
     chronologicalMatches.forEach((m) => {
-      const oppId = m.playerAId === studentId ? m.playerBId : m.playerAId;
-      const opponent = students.find((s) => s.id === oppId);
-      if (opponent) {
-        // 이 시점의 RP 차이나 티어로 확인
-        const playerTier = getTier(student.rp, tierThresholds);
-        const oppTier = getTier(opponent.rp, tierThresholds);
-        const playerTierRank = TIER_RANKING[playerTier] ?? 1;
-        const oppTierRank = TIER_RANKING[oppTier] ?? 1;
-        if (oppTierRank > playerTierRank) {
-          higherTierCount++;
+      const isOnTeamA = m.playerAId === studentId || m.playerA2Id === studentId;
+      const oppIds = isOnTeamA 
+        ? [m.playerBId, m.playerB2Id].filter(Boolean) as string[] 
+        : [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
+      
+      const hasHigherTierOpponent = oppIds.some((id) => {
+        const opponent = students.find((s) => s.id === id);
+        if (opponent) {
+          const playerTier = getTier(student.rp, tierThresholds);
+          const oppTier = getTier(opponent.rp, tierThresholds);
+          const playerTierRank = TIER_RANKING[playerTier] ?? 1;
+          const oppTierRank = TIER_RANKING[oppTier] ?? 1;
+          return oppTierRank > playerTierRank;
         }
+        return false;
+      });
+      
+      if (hasHigherTierOpponent) {
+        higherTierCount++;
       }
     });
 
@@ -1919,6 +2335,9 @@ export function useLeagueStore() {
     saveLeagueSettings,
     calculateAchievements,
     promotionEvent,
-    setPromotionEvent
+    setPromotionEvent,
+    opMode,
+    setOpMode,
+    getSchoolMode
   };
 }

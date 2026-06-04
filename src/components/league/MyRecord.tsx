@@ -62,7 +62,7 @@ export function MyRecord({
   const myMatches = useMemo(() => {
     if (!me) return [];
     return matches
-      .filter((m) => m.playerAId === me.id || m.playerBId === me.id)
+      .filter((m) => m.playerAId === me.id || m.playerBId === me.id || m.playerA2Id === me.id || m.playerB2Id === me.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [me, matches]);
 
@@ -369,22 +369,37 @@ export function MyRecord({
           ) : (
             <div className="divide-y divide-border/30">
               {myMatches.map((m) => {
-                // 상대방 ID 검색
-                const oppId = m.playerAId === me.id ? m.playerBId : m.playerAId;
-                const opponent = students.find((s) => s.id === oppId);
-                const oppName = opponent ? opponent.name : "탈퇴한 학생";
-                const oppClass = opponent ? `${opponent.grade}학년 ${opponent.classNum}반` : "기타 소속";
-                const oppRp = opponent ? opponent.rp : 1000;
+                // 내 소속 팀이 Team A인지 확인
+                const isTeamA = m.playerAId === me.id || m.playerA2Id === me.id;
+                
+                // 상대방 팀 구성원 검색
+                const oppIds = isTeamA 
+                  ? [m.playerBId, m.playerB2Id].filter(Boolean) as string[]
+                  : [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
+                const oppPlayers = oppIds.map(id => students.find((s) => s.id === id)).filter(Boolean);
+                const oppName = oppPlayers.map(o => o.name).join(" & ") || "탈퇴한 학생";
+                const oppClass = oppPlayers[0] ? `${oppPlayers[0].grade}학년 ${oppPlayers[0].classNum}반` : "기타 소속";
+                
+                // 내 파트너 검색 (복식일 경우)
+                const partnerId = isTeamA 
+                  ? (m.playerAId === me.id ? m.playerA2Id : m.playerAId)
+                  : (m.playerBId === me.id ? m.playerB2Id : m.playerBId);
+                const partner = partnerId ? students.find((s) => s.id === partnerId) : null;
                 
                 // 승패 여부
-                const isWin = (m.playerAId === me.id && m.scoreA > m.scoreB) || (m.playerBId === me.id && m.scoreB > m.scoreA);
+                const isWin = isTeamA ? (m.scoreA > m.scoreB) : (m.scoreB > m.scoreA);
                 
                 // 스코어 포맷
-                const myScore = m.playerAId === me.id ? m.scoreA : m.scoreB;
-                const oppScore = m.playerAId === me.id ? m.scoreB : m.scoreA;
+                const myScore = isTeamA ? m.scoreA : m.scoreB;
+                const oppScore = isTeamA ? m.scoreB : m.scoreA;
 
                 // RP 변동폭 (정밀 계산 변동폭 지원)
-                const matchDelta = m.playerAId === me.id ? m.rpDeltaA : m.rpDeltaB;
+                let matchDelta: number | undefined;
+                if (m.playerAId === me.id) matchDelta = m.rpDeltaA;
+                else if (m.playerBId === me.id) matchDelta = m.rpDeltaB;
+                else if (m.playerA2Id === me.id) matchDelta = m.rpDeltaA2;
+                else if (m.playerB2Id === me.id) matchDelta = m.rpDeltaB2;
+                
                 const rpDelta = matchDelta !== undefined ? matchDelta : (isWin ? rpVariables.winDelta : -rpVariables.loseDelta);
 
                 // 경기 날짜 포맷
@@ -409,8 +424,15 @@ export function MyRecord({
                         {isWin ? "WIN" : "LOSE"}
                       </div>
                       <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-black text-sm text-foreground">vs {oppName}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-black text-sm text-foreground">
+                            vs {oppName}
+                          </span>
+                          {partner && (
+                            <span className="text-[10px] font-bold text-neon-blue bg-neon-blue/10 border border-neon-blue/20 rounded px-1.5 py-0.5">
+                              동료: {partner.name}
+                            </span>
+                          )}
                           <span className="text-[10px] font-bold text-muted-foreground/80 bg-background/50 border border-border/40 rounded px-1 py-0.5">
                             {oppClass}
                           </span>

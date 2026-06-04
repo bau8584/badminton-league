@@ -20,22 +20,37 @@ export type Match = {
   id: string;
   playerAId: string;
   playerBId: string;
+  playerA2Id?: string; // 복식 파트너 A2
+  playerB2Id?: string; // 복식 파트너 B2
   scoreA: number;
   scoreB: number;
   date: string;
+  matchType?: "single" | "double"; // 경기 방식 (단식/복식)
   rpDeltaA?: number;
   rpDeltaB?: number;
+  rpDeltaA2?: number; // 복식 파트너 A2 RP 변동
+  rpDeltaB2?: number; // 복식 파트너 B2 RP 변동
   // 각 경기 시점 지급된 보너스 개별 감사 내역
   underdogBonusA?: number;
   underdogBonusB?: number;
+  underdogBonusA2?: number;
+  underdogBonusB2?: number;
   scoreDiffBonusA?: number;
   scoreDiffBonusB?: number;
+  scoreDiffBonusA2?: number;
+  scoreDiffBonusB2?: number;
   rivalBonusA?: number;
   rivalBonusB?: number;
+  rivalBonusA2?: number;
+  rivalBonusB2?: number;
   firstWinBonusA?: number;
   firstWinBonusB?: number;
+  firstWinBonusA2?: number;
+  firstWinBonusB2?: number;
   revengeBonusA?: number;
   revengeBonusB?: number;
+  revengeBonusA2?: number;
+  revengeBonusB2?: number;
 };
 
 export type TierName = "Bronze" | "Silver" | "Gold" | "Platinum" | "Diamond";
