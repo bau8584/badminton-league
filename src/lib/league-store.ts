@@ -1,6 +1,24 @@
 import { useEffect, useState, useCallback } from "react";
 import type { Student, Match, Gender, TierName } from "./league-types";
-import { studentKey, getTier } from "./league-types";
+import { studentKey, getTier, getTierSubdivision, getFullTierLabel, TIER_ORDER } from "./league-types";
+
+export type Achievement = {
+  id: string;
+  name: string;
+  description: string;
+  tier: "Common" | "Rare" | "Epic" | "Legendary";
+  currentValue: number;
+  targetValue: number;
+  isUnlocked: boolean;
+};
+
+export type ActiveBonuses = {
+  firstWin: boolean;
+  revenge: boolean;
+  underdog: boolean;
+  scoreDiff: boolean;
+  rival: boolean;
+};
 
 const TIER_RANKING: Record<TierName, number> = {
   Bronze: 1,
@@ -15,6 +33,7 @@ const MATCHES_KEY = "bdm.matches.v1";
 const TITLE_KEY = "bdm.title.v1";
 const LOCKED_KEY = "bdm.locked.v1";
 const SETTINGS_KEY = "bdm.settings.v1";
+const BONUSES_KEY = "bdm.bonuses.v1";
 
 // 세션 영속 저장을 위한 로컬스토리지 키
 const SESSION_KEY = "bdm.session.v1";
@@ -27,13 +46,36 @@ function uid() {
 }
 
 const SEED_STUDENTS: Student[] = [
-  { id: uid(), grade: 5, classNum: 1, number: 3,  name: "홍길동", gender: "M", rp: 1320, recent: ["W","W","L","W","W"], wins: 8, losses: 3 },
-  { id: uid(), grade: 5, classNum: 1, number: 7,  name: "김철수", gender: "M", rp: 1180, recent: ["L","W","W","L","W"], wins: 6, losses: 5 },
-  { id: uid(), grade: 6, classNum: 2, number: 2,  name: "이영희", gender: "F", rp: 1620, recent: ["W","W","W","W","L"], wins: 12, losses: 2 },
-  { id: uid(), grade: 6, classNum: 2, number: 9,  name: "박민수", gender: "M", rp: 1450, recent: ["W","L","W","W","W"], wins: 9, losses: 3 },
-  { id: uid(), grade: 4, classNum: 3, number: 5,  name: "최서연", gender: "F", rp: 980,  recent: ["L","L","W","L","W"], wins: 3, losses: 6 },
-  { id: uid(), grade: 3, classNum: 1, number: 11, name: "정우진", gender: "M", rp: 1050, recent: ["W","L","L","W","L"], wins: 4, losses: 5 },
-  { id: uid(), grade: 6, classNum: 1, number: 4,  name: "강하늘", gender: "F", rp: 1530, recent: ["W","W","L","W","W"], wins: 10, losses: 4 },
+  { id: uid(), grade: 5, classNum: 1, number: 1,  name: "강서준", gender: "M", rp: 1320, recent: ["W","W","L","W","W"], wins: 8, losses: 3 },
+  { id: uid(), grade: 5, classNum: 1, number: 2,  name: "김민재", gender: "M", rp: 1180, recent: ["L","W","W","L","W"], wins: 6, losses: 5 },
+  { id: uid(), grade: 6, classNum: 2, number: 1,  name: "이지우", gender: "F", rp: 1620, recent: ["W","W","W","W","L"], wins: 12, losses: 2 },
+  { id: uid(), grade: 6, classNum: 2, number: 2,  name: "박지성", gender: "M", rp: 1450, recent: ["W","L","W","W","W"], wins: 9, losses: 3 },
+  { id: uid(), grade: 4, classNum: 3, number: 1,  name: "최서아", gender: "F", rp: 980,  recent: ["L","L","W","L","W"], wins: 3, losses: 6 },
+  { id: uid(), grade: 3, classNum: 1, number: 1,  name: "정윤우", gender: "M", rp: 1050, recent: ["W","L","L","W","L"], wins: 4, losses: 5 },
+  { id: uid(), grade: 6, classNum: 1, number: 1,  name: "강하윤", gender: "F", rp: 1530, recent: ["W","W","L","W","W"], wins: 10, losses: 4 },
+  { id: uid(), grade: 5, classNum: 2, number: 1,  name: "윤도현", gender: "M", rp: 1210, recent: ["W","L","W","L","W"], wins: 7, losses: 5 },
+  { id: uid(), grade: 5, classNum: 2, number: 2,  name: "이지민", gender: "F", rp: 1110, recent: ["L","W","L","W","L"], wins: 5, losses: 7 },
+  { id: uid(), grade: 6, classNum: 1, number: 2,  name: "한주원", gender: "M", rp: 1390, recent: ["W","W","W","L","L"], wins: 8, losses: 4 },
+  { id: uid(), grade: 6, classNum: 1, number: 3,  name: "김수아", gender: "F", rp: 1490, recent: ["W","L","W","W","W"], wins: 10, losses: 2 },
+  { id: uid(), grade: 4, classNum: 1, number: 1,  name: "최예준", gender: "M", rp: 1020, recent: ["L","W","W","L","L"], wins: 4, losses: 6 },
+  { id: uid(), grade: 4, classNum: 1, number: 2,  name: "박서윤", gender: "F", rp: 950,  recent: ["L","L","L","W","W"], wins: 2, losses: 8 },
+  { id: uid(), grade: 3, classNum: 2, number: 1,  name: "송민우", gender: "M", rp: 1040, recent: ["W","L","W","L","W"], wins: 5, losses: 5 },
+  { id: uid(), grade: 3, classNum: 2, number: 2,  name: "윤아린", gender: "F", rp: 920,  recent: ["L","L","W","L","L"], wins: 2, losses: 8 },
+  { id: uid(), grade: 5, classNum: 3, number: 1,  name: "정민서", gender: "F", rp: 1250, recent: ["W","W","L","W","L"], wins: 7, losses: 5 },
+  { id: uid(), grade: 5, classNum: 3, number: 2,  name: "조현우", gender: "M", rp: 1300, recent: ["W","W","W","L","W"], wins: 9, losses: 3 },
+  { id: uid(), grade: 6, classNum: 3, number: 1,  name: "신지아", gender: "F", rp: 1580, recent: ["W","W","W","W","W"], wins: 13, losses: 1 },
+  { id: uid(), grade: 6, classNum: 3, number: 2,  name: "유재희", gender: "M", rp: 1410, recent: ["L","W","W","W","L"], wins: 8, losses: 4 },
+  { id: uid(), grade: 4, classNum: 2, number: 1,  name: "김하은", gender: "F", rp: 1070, recent: ["W","W","L","L","W"], wins: 6, losses: 4 },
+  { id: uid(), grade: 4, classNum: 2, number: 2,  name: "임지우", gender: "M", rp: 1150, recent: ["W","L","W","W","L"], wins: 8, losses: 5 },
+  { id: uid(), grade: 3, classNum: 3, number: 1,  name: "서준우", gender: "M", rp: 1010, recent: ["L","L","W","W","L"], wins: 3, losses: 6 },
+  { id: uid(), grade: 3, classNum: 3, number: 2,  name: "오다인", gender: "F", rp: 980,  recent: ["W","L","L","L","W"], wins: 4, losses: 6 },
+  { id: uid(), grade: 5, classNum: 1, number: 3,  name: "황지안", gender: "F", rp: 1220, recent: ["L","W","W","W","L"], wins: 7, losses: 5 },
+  { id: uid(), grade: 5, classNum: 1, number: 4,  name: "박건우", gender: "M", rp: 1190, recent: ["W","L","L","W","W"], wins: 6, losses: 5 },
+  { id: uid(), grade: 6, classNum: 2, number: 3,  name: "김태양", gender: "M", rp: 1350, recent: ["L","W","L","W","W"], wins: 7, losses: 5 },
+  { id: uid(), grade: 6, classNum: 2, number: 4,  name: "송지효", gender: "F", rp: 1280, recent: ["W","L","W","L","L"], wins: 5, losses: 6 },
+  { id: uid(), grade: 4, classNum: 3, number: 2,  name: "권은우", gender: "M", rp: 1120, recent: ["W","W","L","L","W"], wins: 6, losses: 5 },
+  { id: uid(), grade: 4, classNum: 3, number: 3,  name: "윤채원", gender: "F", rp: 1050, recent: ["L","W","W","L","L"], wins: 4, losses: 6 },
+  { id: uid(), grade: 5, classNum: 2, number: 3,  name: "백현우", gender: "M", rp: 1270, recent: ["W","L","W","W","W"], wins: 9, losses: 3 }
 ];
 
 function loadJSON<T>(key: string, fallback: T): T {
@@ -59,6 +101,8 @@ type UserSession = {
   userName: string;
   scriptUrl: string;
   studentId?: string;
+  leagueName?: string;
+  settingsBonus?: string | Record<string, boolean>;
 } | null;
 
 export function useLeagueStore() {
@@ -90,6 +134,16 @@ export function useLeagueStore() {
     winDelta: 25,
     loseDelta: 20
   });
+
+  const [activeBonuses, setActiveBonuses] = useState<ActiveBonuses>({
+    firstWin: true,
+    revenge: true,
+    underdog: true,
+    scoreDiff: true,
+    rival: true
+  });
+
+  const [promotionEvent, setPromotionEvent] = useState<{ isPromoted: boolean; newTier: string } | null>(null);
 
   // 1. 구글 스프레드시트 데이터베이스 전체 일괄 동기화 (POST)
   const syncWithGoogleSheets = useCallback(async (currentStudents: Student[], currentMatches: Match[]) => {
@@ -128,7 +182,7 @@ export function useLeagueStore() {
     const cleanedCode = accessCodeOrName.trim();
 
     // A. 🎮 게스트(체험용) 모드 예외 처리 - 구글 통신 없이 즉시 로컬 실행 가동
-    if (cleanedSchool.toLowerCase() === "guest") {
+    if (cleanedSchool.toLowerCase() === "guest" || cleanedSchool === "꿈나무 초등학교") {
       const guestSession = {
         loginId: "guest",
         role: "TEACHER" as const,
@@ -140,73 +194,56 @@ export function useLeagueStore() {
       saveJSON(SESSION_KEY, guestSession);
       
       const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
-      if (!localStudents || localStudents.length === 0) {
+      if (!localStudents || localStudents.length < 20) {
         setStudents(SEED_STUDENTS);
         saveJSON(STUDENTS_KEY, SEED_STUDENTS);
+      } else {
+        setStudents(localStudents);
       }
       return { success: true };
     }
 
     setIsSyncing(true);
     try {
-      // 1. 청림초등학교 교사 바로 로그인 매핑 지름길 (최우선 처리)
-      if (role === "TEACHER" && (cleanedSchool === "청림초" || cleanedSchool === "청림초등학교") && cleanedCode === "1234") {
-        const targetSession = {
-          loginId: "bau8584",
-          role: "TEACHER" as const,
-          schoolName: "청림초등학교",
-          userName: "박주현",
-          scriptUrl: "https://script.google.com/macros/s/AKfycbxXC4J6zKWq_vEEbh_CnARl9V6SD9Dtt_nk1oMcmIZHTJVU5XdqV8xYM5d5YkOu6COEYA/exec"
-        };
-        setSession(targetSession);
-        saveJSON(SESSION_KEY, targetSession);
-        setTeacherAccessCode(cleanedCode);
-        localStorage.setItem("bdm.teacherAccessCode.v1", cleanedCode);
-
-        // 구글 시트에서 즉시 전적 데이터 끌어오기 (Hydration)
+      // 1. 학생 로그인 시, 구글 마스터 DB의 등록된 교사/학교 목록을 조회하여 해당 학교의 구글 시트 scriptUrl을 동적으로 찾고 명단 최신화
+      if (role === "STUDENT") {
+        let schoolScriptUrl = "";
         try {
-          const remoteRes = await fetch(targetSession.scriptUrl);
-          const remoteData = await remoteRes.json();
-          if (remoteData.status === "success") {
-            if (remoteData.students) {
+          const teachersRes = await fetch(`${MASTER_API_URL}?action=GET_TEACHERS`);
+          const teachersData = await teachersRes.json();
+          if (teachersData.status === "success" && teachersData.teachers) {
+            const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
+            const targetSchool = normalizeSchool(cleanedSchool);
+            const matchedTeacher = teachersData.teachers.find(
+              (t: any) => 
+                normalizeSchool(t.schoolName) === targetSchool || 
+                normalizeSchool(t.loginId) === targetSchool
+            );
+            if (matchedTeacher && matchedTeacher.scriptUrl) {
+              schoolScriptUrl = matchedTeacher.scriptUrl;
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to retrieve matching school scriptUrl for student:", err);
+        }
+
+        let activeStudents = students;
+        if (schoolScriptUrl) {
+          try {
+            const res = await fetch(schoolScriptUrl);
+            const remoteData = await res.json();
+            if (remoteData.status === "success" && remoteData.students) {
+              activeStudents = remoteData.students;
               setStudents(remoteData.students);
               saveJSON(STUDENTS_KEY, remoteData.students);
+              if (remoteData.matches) {
+                setMatches(remoteData.matches);
+                saveJSON(MATCHES_KEY, remoteData.matches);
+              }
             }
-            if (remoteData.matches) {
-              setMatches(remoteData.matches);
-              saveJSON(MATCHES_KEY, remoteData.matches);
-            }
+          } catch (err) {
+            console.warn("Failed fetching student roster from school scriptUrl:", err);
           }
-        } catch (err) {
-          console.warn("Could not download remote sheet data for Cheonglim. Using cache:", err);
-          const localStudents = loadJSON<Student[] | null>(STUDENTS_KEY, null);
-          if (!localStudents || localStudents.length === 0) {
-            setStudents(SEED_STUDENTS);
-            saveJSON(STUDENTS_KEY, SEED_STUDENTS);
-          }
-        }
-        return { success: true };
-      }
-
-      // 2. 청림초등학교 학생 바로 로그인 매핑 지름길 (원격 명렬 자동 하이드레이션 + 동명이인 대응)
-      if (role === "STUDENT" && (cleanedSchool === "청림초" || cleanedSchool === "청림초등학교")) {
-        let activeStudents = students;
-        const 청림초_scriptUrl = "https://script.google.com/macros/s/AKfycbxXC4J6zKWq_vEEbh_CnARl9V6SD9Dtt_nk1oMcmIZHTJVU5XdqV8xYM5d5YkOu6COEYA/exec";
-        
-        try {
-          const res = await fetch(청림초_scriptUrl);
-          const remoteData = await res.json();
-          if (remoteData.status === "success" && remoteData.students) {
-            activeStudents = remoteData.students;
-            setStudents(remoteData.students);
-            saveJSON(STUDENTS_KEY, remoteData.students);
-            if (remoteData.matches) {
-              setMatches(remoteData.matches);
-              saveJSON(MATCHES_KEY, remoteData.matches);
-            }
-          }
-        } catch (err) {
-          console.warn("Offline or failed fetching student roster from scriptUrl:", err);
         }
 
         if (activeStudents.length === 0) {
@@ -223,20 +260,44 @@ export function useLeagueStore() {
           const studentSession = {
             loginId: "student_" + cleanedCode + "_" + matchStudent.id,
             role: "STUDENT" as const,
-            schoolName: "청림초등학교",
+            schoolName: cleanedSchool,
             userName: cleanedCode,
             studentId: matchStudent.id,
-            scriptUrl: 청림초_scriptUrl
+            scriptUrl: schoolScriptUrl
           };
           setSession(studentSession);
           saveJSON(SESSION_KEY, studentSession);
           return { success: true };
         } else {
-          return { success: false, message: `청림초등학교 명단에 '${studentGrade}학년 ${studentClass}반 ${cleanedCode}' 학생이 존재하지 않습니다. 교사에게 문의하세요.` };
+          return { success: false, message: `${cleanedSchool} 명단에 '${studentGrade}학년 ${studentClass}반 ${cleanedCode}' 학생이 존재하지 않습니다. 교사에게 문의하세요.` };
         }
       }
 
-      // 3. MASTER 최고 관리자 또는 기타 등록 계정 로그인 시도 (마스터 API 통신)
+      // 2. MASTER 최고 관리자 또는 TEACHER 로그인 시도 (마스터 API 통신)
+      let loginIdToUse = role === "MASTER" ? cleanedSchool : cleanedSchool;
+
+      if (role === "TEACHER") {
+        // 교사의 경우, 학교명 입력이 단축어 또는 실제 schoolName 혹은 loginId 에 해당하는지 마스터 교사 목록에서 조회하여 실제 ID 매핑
+        try {
+          const teachersRes = await fetch(`${MASTER_API_URL}?action=GET_TEACHERS`);
+          const teachersData = await teachersRes.json();
+          if (teachersData.status === "success" && teachersData.teachers) {
+            const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
+            const targetSchool = normalizeSchool(cleanedSchool);
+            const matchedTeacher = teachersData.teachers.find(
+              (t: any) => 
+                normalizeSchool(t.schoolName) === targetSchool || 
+                normalizeSchool(t.loginId) === targetSchool
+            );
+            if (matchedTeacher) {
+              loginIdToUse = matchedTeacher.loginId;
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to retrieve matching teacher loginId from GET_TEACHERS, using cleanedSchool directly:", err);
+        }
+      }
+
       const response = await fetch(MASTER_API_URL, {
         method: "POST",
         headers: {
@@ -244,7 +305,7 @@ export function useLeagueStore() {
         },
         body: JSON.stringify({
           action: "LOGIN",
-          loginId: role === "MASTER" ? cleanedSchool : (role === "TEACHER" ? cleanedSchool : `student_${cleanedCode}`),
+          loginId: loginIdToUse,
           password: cleanedCode,
           role
         })
@@ -257,6 +318,22 @@ export function useLeagueStore() {
         if (role === "TEACHER" || role === "MASTER") {
           setTeacherAccessCode(cleanedCode);
           localStorage.setItem("bdm.teacherAccessCode.v1", cleanedCode);
+        }
+        
+        if (data.user.leagueName) {
+          setTitle(data.user.leagueName);
+          saveJSON(TITLE_KEY, data.user.leagueName);
+        }
+        if (data.user.settingsBonus) {
+          try {
+            const parsed = typeof data.user.settingsBonus === "string" 
+              ? JSON.parse(data.user.settingsBonus) 
+              : data.user.settingsBonus;
+            setActiveBonuses(parsed);
+            saveJSON(BONUSES_KEY, parsed);
+          } catch (e) {
+            console.error("Failed parsing settingsBonus from login response:", e);
+          }
         }
         
         if (data.user.scriptUrl) {
@@ -341,8 +418,12 @@ export function useLeagueStore() {
               const teachersRes = await fetch(`${MASTER_API_URL}?action=GET_TEACHERS`);
               const teachersData = await teachersRes.json();
               if (teachersData.status === "success" && teachersData.teachers) {
+                const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
+                const targetSchool = normalizeSchool(cleanedSchool);
                 const matchedTeacher = teachersData.teachers.find(
-                  (t: any) => t.schoolName.trim() === cleanedSchool || t.loginId.trim() === cleanedSchool
+                  (t: any) => 
+                    normalizeSchool(t.schoolName) === targetSchool || 
+                    normalizeSchool(t.loginId) === targetSchool
                 );
                 if (matchedTeacher) {
                   schoolScriptUrl = matchedTeacher.scriptUrl;
@@ -390,29 +471,6 @@ export function useLeagueStore() {
                 saveJSON(STUDENTS_KEY, SEED_STUDENTS);
               }
             }
-            return { success: true };
-          }
-        }
-
-        if (role === "STUDENT") {
-          // Fallback student local check (동명이인 대응)
-          const activeStudents = students.length > 0 ? students : loadJSON<Student[]>(STUDENTS_KEY, SEED_STUDENTS);
-          const matchStudent = activeStudents.find((s) => 
-            s.name === cleanedCode &&
-            (studentGrade === undefined || s.grade === studentGrade) &&
-            (studentClass === undefined || s.classNum === studentClass)
-          );
-          if (matchStudent) {
-            const studentSession = {
-              loginId: "student_" + cleanedCode + "_" + matchStudent.id,
-              role: "STUDENT" as const,
-              schoolName: cleanedSchool,
-              userName: cleanedCode,
-              studentId: matchStudent.id,
-              scriptUrl: ""
-            };
-            setSession(studentSession);
-            saveJSON(SESSION_KEY, studentSession);
             return { success: true };
           }
         }
@@ -527,7 +585,7 @@ export function useLeagueStore() {
       const localTitle = loadJSON<string>(TITLE_KEY, "2026 초등 리그전");
       const localLocked = loadJSON<boolean>(LOCKED_KEY, false);
 
-      const activeStudents = localStudents && localStudents.length > 0 ? localStudents : SEED_STUDENTS;
+      const activeStudents = localStudents !== null ? localStudents : SEED_STUDENTS;
       setStudents(activeStudents);
       setMatches(localMatches);
       setTitle(localTitle);
@@ -540,29 +598,127 @@ export function useLeagueStore() {
         if (localSettings.rpVars) setRpVariables(localSettings.rpVars);
       }
 
+      // 보너스 활성화 로드
+      const localBonuses = loadJSON<ActiveBonuses | null>(BONUSES_KEY, null);
+      if (localBonuses) {
+        setActiveBonuses(localBonuses);
+      }
+
+      // 세션 기반 타이틀 및 설정 로드
+      if (cachedSession) {
+        if (cachedSession.leagueName) {
+          setTitle(cachedSession.leagueName);
+        }
+        if (cachedSession.settingsBonus) {
+          try {
+            const parsed = typeof cachedSession.settingsBonus === "string" 
+              ? JSON.parse(cachedSession.settingsBonus) 
+              : cachedSession.settingsBonus;
+            setActiveBonuses(parsed);
+          } catch (e) {
+            console.error("Failed to parse cached session bonuses:", e);
+          }
+        }
+      }
+
       setHydrated(true);
 
-      // C. 세션이 살아있는 경우 개인 구글 시트 연동 갱신 (GET)
-      if (cachedSession && cachedSession.scriptUrl) {
-        setIsSyncing(true);
-        try {
-          const response = await fetch(cachedSession.scriptUrl);
-          const data = await response.json();
-          if (data.status === "success") {
-            if (data.students && data.students.length > 0) {
-              setStudents(data.students);
-              saveJSON(STUDENTS_KEY, data.students);
+      // C. 세션이 살아있는 경우 구글 시트 검증 및 연동 데이터 강제 최신화 (Source of Truth)
+      if (cachedSession) {
+        let currentSession = cachedSession;
+
+        // 1. 교사/마스터 권한 세션의 경우 구글 시트 마스터 DB와 인증 정보(비밀번호) 재동기화
+        const cachedCode = localStorage.getItem("bdm.teacherAccessCode.v1") || "";
+        if ((cachedSession.role === "TEACHER" || cachedSession.role === "MASTER") && cachedCode) {
+          try {
+            let loginIdToVerify = cachedSession.role === "MASTER" ? cachedSession.loginId : cachedSession.schoolName;
+
+            if (cachedSession.role === "TEACHER") {
+              const teachersRes = await fetch(`${MASTER_API_URL}?action=GET_TEACHERS`);
+              const teachersData = await teachersRes.json();
+              if (teachersData.status === "success" && teachersData.teachers) {
+                const normalizeSchool = (name: string) => name.replace(/(초등학교|초등|학교|초)$/, "").trim();
+                const targetSchool = normalizeSchool(cachedSession.schoolName);
+                const matchedTeacher = teachersData.teachers.find(
+                  (t: any) => 
+                    normalizeSchool(t.schoolName) === targetSchool || 
+                    normalizeSchool(t.loginId) === targetSchool
+                );
+                if (matchedTeacher) {
+                  loginIdToVerify = matchedTeacher.loginId;
+                }
+              }
             }
-            if (data.matches) {
-              setMatches(data.matches);
-              saveJSON(MATCHES_KEY, data.matches);
+
+            const verifyRes = await fetch(MASTER_API_URL, {
+              method: "POST",
+              headers: {
+                "Content-Type": "text/plain;charset=utf-8",
+              },
+              body: JSON.stringify({
+                action: "LOGIN",
+                loginId: loginIdToVerify,
+                password: cachedCode,
+                role: cachedSession.role
+              })
+            });
+            const verifyData = await verifyRes.json();
+            if (verifyData.status !== "success" || !verifyData.user) {
+              // 마스터 DB에서 비밀번호 불일치로 판정 -> 로컬 캐시 꼬임 방지를 위해 강제 로그아웃
+              console.warn("Cached session validation failed (password changed in Google Sheets). Force logging out.");
+              setSession(null);
+              saveJSON(SESSION_KEY, null);
+              setTeacherAccessCode("1234");
+              localStorage.removeItem("bdm.teacherAccessCode.v1");
+              return;
+            } else {
+              // 최신 세션 정보 동기화
+              currentSession = verifyData.user;
+              setSession(verifyData.user);
+              saveJSON(SESSION_KEY, verifyData.user);
             }
-            console.log("Google Sheets database synchronized on session load!");
+          } catch (err) {
+            console.warn("Failed online-verifying cached session. Falling back to local cache:", err);
           }
-        } catch (error) {
-          console.warn("Could not sync with remote sheet on initialization. Local cache utilized:", error);
-        } finally {
-          setIsSyncing(false);
+        }
+
+        // 2. 최신 구글 시트 데이터를 가져와 로컬 상태 강제 최신화
+        if (currentSession.scriptUrl) {
+          setIsSyncing(true);
+          try {
+            const response = await fetch(currentSession.scriptUrl);
+            const data = await response.json();
+            if (data.status === "success") {
+              if (data.students) {
+                setStudents(data.students);
+                saveJSON(STUDENTS_KEY, data.students);
+              }
+              if (data.matches) {
+                setMatches(data.matches);
+                saveJSON(MATCHES_KEY, data.matches);
+              }
+              if (data.leagueName) {
+                setTitle(data.leagueName);
+                saveJSON(TITLE_KEY, data.leagueName);
+              }
+              if (data.settingsBonus) {
+                try {
+                  const parsed = typeof data.settingsBonus === "string" 
+                    ? JSON.parse(data.settingsBonus) 
+                    : data.settingsBonus;
+                  setActiveBonuses(parsed);
+                  saveJSON(BONUSES_KEY, parsed);
+                } catch (e) {
+                  console.error("Failed parsing settingsBonus from remote GET:", e);
+                }
+              }
+              console.log("Google Sheets database synchronized on session load!");
+            }
+          } catch (error) {
+            console.warn("Could not sync with remote sheet on initialization. Local cache utilized:", error);
+          } finally {
+            setIsSyncing(false);
+          }
         }
       }
     };
@@ -576,6 +732,7 @@ export function useLeagueStore() {
   useEffect(() => { if (hydrated) saveJSON(TITLE_KEY, title); }, [title, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(LOCKED_KEY, isLocked); }, [isLocked, hydrated]);
   useEffect(() => { if (hydrated) saveJSON(SETTINGS_KEY, { thresholds: tierThresholds, rpVars: rpVariables }); }, [tierThresholds, rpVariables, hydrated]);
+  useEffect(() => { if (hydrated) saveJSON(BONUSES_KEY, activeBonuses); }, [activeBonuses, hydrated]);
 
   // 경기 기록 및 동기화 (언더독 & 점수차 & 라이벌 & 첫승 & 복수전 누적 보상 적용)
   const recordMatch = useCallback((playerAId: string, playerBId: string, scoreA: number, scoreB: number) => {
@@ -594,39 +751,57 @@ export function useLeagueStore() {
     const winnerPlayer = aWon ? playerA : playerB;
     const loserPlayer = aWon ? playerB : playerA;
 
-    // 1. 언더독 보너스 (최대 15점 캡)
+    // 1. 언더독 보너스 (N RP: 자신보다 높은 티어를 이겼을 때 점수 차의 10% 지급)
     let underdogBonus = 0;
     const winPrevRp = winnerPlayer.rp;
     const losePrevRp = loserPlayer.rp;
-    if (winPrevRp < losePrevRp) {
-      underdogBonus = Math.min(15, Math.floor((losePrevRp - winPrevRp) * 0.1));
+    if (activeBonuses.underdog && winPrevRp < losePrevRp) {
+      const winTier = getTier(winPrevRp, tierThresholds);
+      const loseTier = getTier(losePrevRp, tierThresholds);
+      const winTierRank = TIER_RANKING[winTier] ?? 1;
+      const loseTierRank = TIER_RANKING[loseTier] ?? 1;
+      if (winTierRank < loseTierRank) {
+        underdogBonus = Math.max(0, Math.floor((losePrevRp - winPrevRp) * 0.1));
+      }
     }
 
-    // 2. 점수차 비례 보상 (최대 10점 캡)
-    const scoreDiff = Math.abs(scoreA - scoreB);
-    const scoreDiffBonus = Math.min(10, scoreDiff);
+    // 2. 점수차 비례 보상 (압승 보너스: 경기 점수 차이 1점당 1점 추가 지급)
+    let scoreDiffBonus = 0;
+    if (activeBonuses.scoreDiff) {
+      scoreDiffBonus = Math.abs(scoreA - scoreB);
+    }
 
-    // 3. 라이벌 매치 보너스 (RP 차이 20점 이하 시 +5점)
-    const rpDiff = Math.abs(preRpA - preRpB);
-    const rivalBonus = rpDiff <= 20 ? 5 : 0;
+    // 3. 라이벌 매치 보너스 (+5 RP: RP 차이가 20점 이하)
+    let rivalBonus = 0;
+    if (activeBonuses.rival) {
+      const rpDiff = Math.abs(preRpA - preRpB);
+      rivalBonus = rpDiff <= 20 ? 5 : 0;
+    }
 
-    // 4. 오늘의 첫 승 보너스 (+15점) - 현지 기준 일자 획득
+    // 오늘의 날짜 구하기 (로컬 타임존 반영)
     const today = new Date();
     const offset = today.getTimezoneOffset();
     const localToday = new Date(today.getTime() - (offset * 60 * 1000));
     const todayYmd = localToday.toISOString().split("T")[0];
 
-    const firstWinBonus = winnerPlayer.lastWinDate !== todayYmd ? 15 : 0;
+    // 4. 오늘의 첫 승 보너스 (+15 RP)
+    let firstWinBonus = 0;
+    if (activeBonuses.firstWin) {
+      firstWinBonus = winnerPlayer.lastWinDate !== todayYmd ? 15 : 0;
+    }
 
-    // 5. 복수전 보너스 (과거에 현재 승자가 현재 패자에게 패한 경기 유무 판별)
-    const hasPastLoss = matches.some((m) => {
-      const isCurrentWinnerA = m.playerAId === winnerId && m.playerBId === loserId;
-      const isCurrentWinnerB = m.playerBId === winnerId && m.playerAId === loserId;
-      if (isCurrentWinnerA) return m.scoreB > m.scoreA; // winner lost to loser
-      if (isCurrentWinnerB) return m.scoreA > m.scoreB; // winner lost to loser
-      return false;
-    });
-    const revengeBonus = hasPastLoss ? 10 : 0;
+    // 5. 복수전 성공 보너스 (+10 RP)
+    let revengeBonus = 0;
+    if (activeBonuses.revenge) {
+      const hasPastLoss = matches.some((m) => {
+        const isCurrentWinnerA = m.playerAId === winnerId && m.playerBId === loserId;
+        const isCurrentWinnerB = m.playerBId === winnerId && m.playerAId === loserId;
+        if (isCurrentWinnerA) return m.scoreB > m.scoreA; // winner lost to loser
+        if (isCurrentWinnerB) return m.scoreA > m.scoreB; // winner lost to loser
+        return false;
+      });
+      revengeBonus = hasPastLoss ? 10 : 0;
+    }
 
     // 6. 최종 변동 RP 계산 (누적 합산 방식)
     const winDeltaTotal = rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus;
@@ -634,6 +809,27 @@ export function useLeagueStore() {
 
     const deltaA = aWon ? winDeltaTotal : loseDeltaTotal;
     const deltaB = aWon ? loseDeltaTotal : winDeltaTotal;
+
+    // 실시간 승급 효과 감지
+    const winnerDelta = aWon ? deltaA : deltaB;
+    const winFinalRp = winPrevRp + winnerDelta;
+    const winPrevTier = getTier(winPrevRp, tierThresholds);
+    const winFinalTier = getTier(winFinalRp, tierThresholds);
+    const winPrevSub = getTierSubdivision(winPrevRp, tierThresholds);
+    const winFinalSub = getTierSubdivision(winFinalRp, tierThresholds);
+
+    const basePromoted = TIER_ORDER.indexOf(winFinalTier) < TIER_ORDER.indexOf(winPrevTier);
+    const subPromoted = winFinalTier === winPrevTier && winFinalSub < winPrevSub;
+    const isPromoted = basePromoted || subPromoted;
+
+    if (isPromoted) {
+      const currentLabel = getFullTierLabel(winFinalRp, tierThresholds);
+      setPromotionEvent({
+        isPromoted: true,
+        newTier: currentLabel,
+        studentName: winnerPlayer.name
+      });
+    }
 
     const match: Match = { 
       id: uid(), 
@@ -1093,38 +1289,56 @@ export function useLeagueStore() {
         const winnerPlayer = aWon ? playerA : playerB;
         const loserPlayer = aWon ? playerB : playerA;
 
-        // A. Underdog bonus (최대 15점 캡)
+        // A. Underdog bonus (N RP: 자신보다 높은 티어를 이겼을 때 점수 차의 10% 지급)
         let underdogBonus = 0;
-        if (winnerPlayer.rp < loserPlayer.rp) {
-          underdogBonus = Math.min(15, Math.floor((loserPlayer.rp - winnerPlayer.rp) * 0.1));
+        if (activeBonuses.underdog && winnerPlayer.rp < loserPlayer.rp) {
+          const winTier = getTier(winnerPlayer.rp, tierThresholds);
+          const loseTier = getTier(loserPlayer.rp, tierThresholds);
+          const winTierRank = TIER_RANKING[winTier] ?? 1;
+          const loseTierRank = TIER_RANKING[loseTier] ?? 1;
+          if (winTierRank < loseTierRank) {
+            underdogBonus = Math.max(0, Math.floor((loserPlayer.rp - winnerPlayer.rp) * 0.1));
+          }
         }
 
-        // B. Score difference bonus (최대 10점 캡)
-        const scoreDiff = Math.abs(nextScoreA - nextScoreB);
-        const scoreDiffBonus = Math.min(10, scoreDiff);
+        // B. Score difference bonus (압승 보너스: 경기 점수 차이 1점당 1점 추가 지급)
+        let scoreDiffBonus = 0;
+        if (activeBonuses.scoreDiff) {
+          scoreDiffBonus = Math.abs(nextScoreA - nextScoreB);
+        }
 
-        // C. Rival bonus (RP 차이 20점 이하 시 +5점)
-        const rpDiff = Math.abs(playerA.rp - playerB.rp);
-        const rivalBonus = rpDiff <= 20 ? 5 : 0;
+        // C. Rival bonus (+5 RP: RP 차이가 20점 이하)
+        let rivalBonus = 0;
+        if (activeBonuses.rival) {
+          const rpDiff = Math.abs(playerA.rp - playerB.rp);
+          rivalBonus = rpDiff <= 20 ? 5 : 0;
+        }
 
-        // D. Daily first win bonus (+15점)
+        // 오늘의 날짜 구하기 (로컬 타임존 반영)
         const today = new Date();
         const offset = today.getTimezoneOffset();
         const localToday = new Date(today.getTime() - (offset * 60 * 1000));
         const todayYmd = localToday.toISOString().split("T")[0];
-        
-        const firstWinBonus = winnerPlayer.lastWinDate !== todayYmd ? 15 : 0;
 
-        // E. Revenge bonus (과거에 패했던 기록이 있을 시 +10점)
-        const pastMatches = prevMatches.filter((m) => m.id !== matchId);
-        const hasPastLoss = pastMatches.some((m) => {
-          const isCurrentWinnerA = m.playerAId === winnerId && m.playerBId === loserId;
-          const isCurrentWinnerB = m.playerBId === winnerId && m.playerAId === loserId;
-          if (isCurrentWinnerA) return m.scoreB > m.scoreA;
-          if (isCurrentWinnerB) return m.scoreA > m.scoreB;
-          return false;
-        });
-        const revengeBonus = hasPastLoss ? 10 : 0;
+        // D. Daily first win bonus (+15 RP)
+        let firstWinBonus = 0;
+        if (activeBonuses.firstWin) {
+          firstWinBonus = winnerPlayer.lastWinDate !== todayYmd ? 15 : 0;
+        }
+
+        // E. Revenge bonus (+10 RP)
+        let revengeBonus = 0;
+        if (activeBonuses.revenge) {
+          const pastMatches = prevMatches.filter((m) => m.id !== matchId);
+          const hasPastLoss = pastMatches.some((m) => {
+            const isCurrentWinnerA = m.playerAId === winnerId && m.playerBId === loserId;
+            const isCurrentWinnerB = m.playerBId === winnerId && m.playerAId === loserId;
+            if (isCurrentWinnerA) return m.scoreB > m.scoreA;
+            if (isCurrentWinnerB) return m.scoreA > m.scoreB;
+            return false;
+          });
+          revengeBonus = hasPastLoss ? 10 : 0;
+        }
 
         // F. Consolidated RP Deltas
         const winDeltaTotal = rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus;
@@ -1132,6 +1346,28 @@ export function useLeagueStore() {
 
         const deltaA = aWon ? winDeltaTotal : loseDeltaTotal;
         const deltaB = aWon ? loseDeltaTotal : winDeltaTotal;
+
+        // 실시간 승급 효과 감지
+        const winnerDelta = aWon ? deltaA : deltaB;
+        const winPrevRp = winnerPlayer.rp;
+        const winFinalRp = winPrevRp + winnerDelta;
+        const winPrevTier = getTier(winPrevRp, tierThresholds);
+        const winFinalTier = getTier(winFinalRp, tierThresholds);
+        const winPrevSub = getTierSubdivision(winPrevRp, tierThresholds);
+        const winFinalSub = getTierSubdivision(winFinalRp, tierThresholds);
+
+        const basePromoted = TIER_ORDER.indexOf(winFinalTier) < TIER_ORDER.indexOf(winPrevTier);
+        const subPromoted = winFinalTier === winPrevTier && winFinalSub < winPrevSub;
+        const isPromoted = basePromoted || subPromoted;
+
+        if (isPromoted) {
+          const currentLabel = getFullTierLabel(winFinalRp, tierThresholds);
+          setPromotionEvent({
+            isPromoted: true,
+            newTier: currentLabel,
+            studentName: winnerPlayer.name
+          });
+        }
 
         // 3. Construct the updated Match record
         updatedMatch = {
@@ -1225,6 +1461,307 @@ export function useLeagueStore() {
     });
   }, [matches, students, tierThresholds, rpVariables, syncWithGoogleSheets]);
 
+  // 리그 커스텀 설정 통합 저장 (마스터 DB 동기화 포함)
+  const saveLeagueSettings = useCallback(async (newTitle: string, newBonuses: ActiveBonuses) => {
+    setTitle(newTitle);
+    setActiveBonuses(newBonuses);
+    saveJSON(TITLE_KEY, newTitle);
+    saveJSON(BONUSES_KEY, newBonuses);
+
+    if (session) {
+      const updatedSession = {
+        ...session,
+        leagueName: newTitle,
+        settingsBonus: newBonuses
+      };
+      setSession(updatedSession);
+      saveJSON(SESSION_KEY, updatedSession);
+
+      setIsSyncing(true);
+      try {
+        const res = await fetch(MASTER_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8",
+          },
+          body: JSON.stringify({
+            action: "UPDATE_LEAGUE_SETTINGS",
+            loginId: session.loginId,
+            role: session.role,
+            schoolName: session.schoolName,
+            leagueName: newTitle,
+            settingsBonus: JSON.stringify(newBonuses)
+          })
+        });
+        const data = await res.json();
+        console.log("Updated league settings on Google Sheets:", data);
+      } catch (err) {
+        console.warn("Failed to sync settings to Google Sheets MASTER row. Kept locally.", err);
+      } finally {
+        setIsSyncing(false);
+      }
+    }
+  }, [session]);
+
+  // 학생용 '나의 업적' 자동 연산 함수 (Derived State)
+  const calculateAchievements = useCallback((studentId: string): Achievement[] => {
+    const student = students.find((s) => s.id === studentId);
+    if (!student) return [];
+
+    // 해당 학생이 참여한 모든 경기 필터링
+    const studentMatches = matches.filter(
+      (m) => m.playerAId === studentId || m.playerBId === studentId
+    );
+
+    // 경기 기록 시간순 정렬 (과거에서 최신순)
+    const chronologicalMatches = [...studentMatches].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    const totalGames = studentMatches.length;
+    const totalLosses = chronologicalMatches.filter((m) => {
+      const isPlayerA = m.playerAId === studentId;
+      const aWon = m.scoreA > m.scoreB;
+      const won = isPlayerA ? aWon : !aWon;
+      return !won;
+    }).length;
+
+    // 연승, 연패, 스냅 연산
+    let maxWinStreak = 0;
+    let currentWinStreak = 0;
+    let maxLossStreak = 0;
+    let currentLossStreak = 0;
+    let brokeLossStreakOf4Plus = false;
+
+    chronologicalMatches.forEach((m) => {
+      const isPlayerA = m.playerAId === studentId;
+      const aWon = m.scoreA > m.scoreB;
+      const won = isPlayerA ? aWon : !aWon;
+
+      if (won) {
+        currentWinStreak++;
+        if (currentLossStreak >= 4) {
+          brokeLossStreakOf4Plus = true;
+        }
+        currentLossStreak = 0;
+        if (currentWinStreak > maxWinStreak) {
+          maxWinStreak = currentWinStreak;
+        }
+      } else {
+        currentLossStreak++;
+        currentWinStreak = 0;
+        if (currentLossStreak > maxLossStreak) {
+          maxLossStreak = currentLossStreak;
+        }
+      }
+    });
+
+    // 자신보다 높은 티어와 대결한 횟수 (승패 무관)
+    let higherTierCount = 0;
+    chronologicalMatches.forEach((m) => {
+      const oppId = m.playerAId === studentId ? m.playerBId : m.playerAId;
+      const opponent = students.find((s) => s.id === oppId);
+      if (opponent) {
+        // 이 시점의 RP 차이나 티어로 확인
+        const playerTier = getTier(student.rp, tierThresholds);
+        const oppTier = getTier(opponent.rp, tierThresholds);
+        const playerTierRank = TIER_RANKING[playerTier] ?? 1;
+        const oppTierRank = TIER_RANKING[oppTier] ?? 1;
+        if (oppTierRank > playerTierRank) {
+          higherTierCount++;
+        }
+      }
+    });
+
+    // 동일 날짜에 5경기 이상 참여 확인
+    const dateCounts: Record<string, number> = {};
+    studentMatches.forEach((m) => {
+      const d = new Date(m.date);
+      const dateStr = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+      dateCounts[dateStr] = (dateCounts[dateStr] || 0) + 1;
+    });
+    const maxMatchesOnSingleDay = Object.values(dateCounts).reduce((max, val) => Math.max(max, val), 0);
+
+    // 복수전 성공 보너스 누적 횟수
+    const revengeCount = studentMatches.filter((m) => {
+      const isPlayerA = m.playerAId === studentId;
+      return isPlayerA ? (m.revengeBonusA ?? 0) > 0 : (m.revengeBonusB ?? 0) > 0;
+    }).length;
+
+    // 라이벌 격퇴 보너스 누적 횟수
+    const rivalCount = studentMatches.filter((m) => {
+      const isPlayerA = m.playerAId === studentId;
+      return isPlayerA ? (m.rivalBonusA ?? 0) > 0 : (m.rivalBonusB ?? 0) > 0;
+    }).length;
+
+    return [
+      // Common (커먼)
+      {
+        id: "court_first_greeting",
+        name: "코트의 첫인사",
+        description: "리그 첫 경기 기록 완료",
+        tier: "Common",
+        currentValue: totalGames >= 1 ? 1 : 0,
+        targetValue: 1,
+        isUnlocked: totalGames >= 1
+      },
+      {
+        id: "warmup_complete",
+        name: "워밍업 완료",
+        description: "누적 경기 수 10회 달성",
+        tier: "Common",
+        currentValue: totalGames,
+        targetValue: 10,
+        isUnlocked: totalGames >= 10
+      },
+      {
+        id: "taste_of_victory",
+        name: "승리의 맛",
+        description: "3연승 달성",
+        tier: "Common",
+        currentValue: maxWinStreak,
+        targetValue: 3,
+        isUnlocked: maxWinStreak >= 3
+      },
+      {
+        id: "unbroken_heart",
+        name: "꺾이지 않는 마음",
+        description: "3연패 기록 (실패를 부끄러워하지 않는 태도 칭찬)",
+        tier: "Common",
+        currentValue: maxLossStreak,
+        targetValue: 3,
+        isUnlocked: maxLossStreak >= 3
+      },
+      // Rare (레어)
+      {
+        id: "iron_stamina",
+        name: "강철 체력",
+        description: "누적 경기 수 30회 달성",
+        tier: "Rare",
+        currentValue: totalGames,
+        targetValue: 30,
+        isUnlocked: totalGames >= 30
+      },
+      {
+        id: "courageous_challenger",
+        name: "용기 있는 도전자",
+        description: "자신보다 티어가 높은 상대와 10회 대결 진행 (승패 무관)",
+        tier: "Rare",
+        currentValue: higherTierCount,
+        targetValue: 10,
+        isUnlocked: higherTierCount >= 10
+      },
+      {
+        id: "gym_spirit",
+        name: "체육관 지박령",
+        description: "동일한 날짜에 5경기 이상 참여",
+        tier: "Rare",
+        currentValue: maxMatchesOnSingleDay,
+        targetValue: 5,
+        isUnlocked: maxMatchesOnSingleDay >= 5
+      },
+      {
+        id: "unyielding_will",
+        name: "불굴의 의지",
+        description: "4연패 이상 기록 후 승리하여 연패 사슬 끊어내기",
+        tier: "Rare",
+        currentValue: brokeLossStreakOf4Plus ? 1 : 0,
+        targetValue: 1,
+        isUnlocked: brokeLossStreakOf4Plus
+      },
+      {
+        id: "avatar_of_revenge",
+        name: "복수의 화신",
+        description: "복수전 성공 보너스 3회 누적 획득",
+        tier: "Rare",
+        currentValue: revengeCount,
+        targetValue: 3,
+        isUnlocked: revengeCount >= 3
+      },
+      // Epic (에픽)
+      {
+        id: "court_ruler",
+        name: "코트의 지배자",
+        description: "누적 경기 수 70회 달성",
+        tier: "Epic",
+        currentValue: totalGames,
+        targetValue: 70,
+        isUnlocked: totalGames >= 70
+      },
+      {
+        id: "honorable_sweat",
+        name: "명예로운 땀방울",
+        description: "누적 패배 수 30회 달성 (실패에 굴하지 않는 스포츠맨십 칭찬)",
+        tier: "Epic",
+        currentValue: totalLosses,
+        targetValue: 30,
+        isUnlocked: totalLosses >= 30
+      },
+      {
+        id: "rival_destroyer",
+        name: "라이벌 파괴자",
+        description: "라이벌 격퇴 보너스 15회 누적 획득",
+        tier: "Epic",
+        currentValue: rivalCount,
+        targetValue: 15,
+        isUnlocked: rivalCount >= 15
+      },
+      // Legendary (레전더리)
+      {
+        id: "legendary_undefeated",
+        name: "무패의 전설",
+        description: "10연승 달성",
+        tier: "Legendary",
+        currentValue: maxWinStreak,
+        targetValue: 10,
+        isUnlocked: maxWinStreak >= 10
+      },
+      {
+        id: "true_champion",
+        name: "진정한 챔피언",
+        description: "누적 경기 수 120회 달성 (한 학기 동안 가장 성실하게 참여한 학생)",
+        tier: "Legendary",
+        currentValue: totalGames,
+        targetValue: 120,
+        isUnlocked: totalGames >= 120
+      }
+    ];
+  }, [students, matches, tierThresholds]);
+
+  // 학생용 티어 승격 실시간 감지 감시자
+  useEffect(() => {
+    if (hydrated && session && session.role === "STUDENT" && session.studentId) {
+      const student = students.find((s) => s.id === session.studentId);
+      if (student) {
+        const currentRp = student.rp;
+        const currentTier = getTier(currentRp, tierThresholds);
+        const currentSub = getTierSubdivision(currentRp, tierThresholds);
+        const currentLabel = getFullTierLabel(currentRp, tierThresholds);
+
+        const lastKnownRpStr = localStorage.getItem(`bdm.lastKnownRp.${session.studentId}`);
+        if (lastKnownRpStr) {
+          const lastRp = parseInt(lastKnownRpStr, 10);
+          if (!isNaN(lastRp) && lastRp !== currentRp) {
+            const lastTier = getTier(lastRp, tierThresholds);
+            const lastSub = getTierSubdivision(lastRp, tierThresholds);
+            
+            const getRank = (t: TierName, s: number) => {
+              const base = { Bronze: 10, Silver: 20, Gold: 30, Platinum: 40, Diamond: 50 }[t] ?? 10;
+              return base + (5 - s);
+            };
+
+            // 이전 랭크보다 현재 랭크가 더 높으면 승급 이벤트 트리거
+            if (getRank(currentTier, currentSub) > getRank(lastTier, lastSub)) {
+              setPromotionEvent({ isPromoted: true, newTier: currentLabel });
+            }
+          }
+        }
+        // 최신 RP로 로컬 캐시 갱신
+        localStorage.setItem(`bdm.lastKnownRp.${session.studentId}`, currentRp.toString());
+      }
+    }
+  }, [students, hydrated, session, tierThresholds]);
+
   return { 
     hydrated, 
     students, 
@@ -1253,6 +1790,11 @@ export function useLeagueStore() {
     restoreFromCSV,
     bulkDecayRP,
     teacherAccessCode,
-    updateMatchScore
+    updateMatchScore,
+    activeBonuses,
+    saveLeagueSettings,
+    calculateAchievements,
+    promotionEvent,
+    setPromotionEvent
   };
 }

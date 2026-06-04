@@ -19,9 +19,11 @@ import {
   Pencil,
   Swords,
   Calendar,
-  Users
+  Users,
+  Settings
 } from "lucide-react";
 import type { Gender, Student, Match, TierName } from "@/lib/league-types";
+import { useLeagueStore, type ActiveBonuses } from "@/lib/league-store";
 import { getTier, TIER_STYLES, getFullTierLabel } from "@/lib/league-types";
 import { GenderMark } from "./GenderMark";
 import { TierBadge } from "./TierBadge";
@@ -95,6 +97,9 @@ export function AdminPanel({
   onBulkDecay,
   teacherAccessCode,
   onUpdateMatchScore,
+  title,
+  activeBonuses,
+  onSaveLeagueSettings,
 }: {
   students: Student[];
   matches: Match[];
@@ -114,6 +119,9 @@ export function AdminPanel({
   onBulkDecay?: (inactiveDays: number, decayAmount: number) => number;
   teacherAccessCode: string;
   onUpdateMatchScore: (matchId: string, scoreA: number, scoreB: number) => void;
+  title?: string;
+  activeBonuses?: ActiveBonuses;
+  onSaveLeagueSettings?: (title: string, bonuses: ActiveBonuses) => Promise<void>;
 }) {
   // CSV 롤백 복원 상태
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
@@ -122,6 +130,8 @@ export function AdminPanel({
 
   // 이중 보안 상태 및 자동 잠금 훅
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const { session } = useLeagueStore();
+  const isDemo = session?.loginId === "guest" || session?.schoolName?.includes("꿈나무");
 
   // 경기 점수 세부 수정 기능 상태
   const [editingMatchId, setEditingMatchId] = useState<string | null>(null);
@@ -138,6 +148,27 @@ export function AdminPanel({
   const [appliedSearchStudent, setAppliedSearchStudent] = useState("");
   const [appliedSearchDate, setAppliedSearchDate] = useState("");
   const [appliedSearchGradeClass, setAppliedSearchGradeClass] = useState("");
+  const [isMatchListOpen, setIsMatchListOpen] = useState(false);
+
+  // 리그 환경 설정 상태
+  const [localTitle, setLocalTitle] = useState(title || "");
+  const [localBonuses, setLocalBonuses] = useState<ActiveBonuses>({
+    firstWin: activeBonuses?.firstWin ?? true,
+    revenge: activeBonuses?.revenge ?? true,
+    underdog: activeBonuses?.underdog ?? true,
+    scoreDiff: activeBonuses?.scoreDiff ?? true,
+    rival: activeBonuses?.rival ?? true,
+  });
+
+  useEffect(() => {
+    if (title) setLocalTitle(title);
+  }, [title]);
+
+  useEffect(() => {
+    if (activeBonuses) {
+      setLocalBonuses(activeBonuses);
+    }
+  }, [activeBonuses]);
 
   useEffect(() => {
     setIsUnlocked(false);
@@ -600,7 +631,7 @@ export function AdminPanel({
   };
 
   // 보안 잠금 가드 렌더링
-  if (!isUnlocked) {
+  if (!isUnlocked && !isDemo) {
     return (
       <SecurityModal
         correctCode={teacherAccessCode}
@@ -612,19 +643,199 @@ export function AdminPanel({
   return (
     <div className="space-y-6">
       
-      {/* 3.9. All Match Records Integrated Management Section (전체 경기 기록 통합 관리) */}
+      {/* 1. League Configuration: Title and Bonus Toggles (리그 환경 설정) */}
       <Card className="border border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl relative overflow-hidden">
-        <div className="mb-4">
-          <div className="flex items-center gap-2 text-neon-blue">
-            <Swords className="size-5" />
-            <h3 className="font-black text-lg">전체 경기 기록 통합 관리</h3>
+        <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-neon-blue">
+              <Settings className="size-5" />
+              <h3 className="font-black text-lg">리그 환경 설정 (League Configurations)</h3>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              리그의 이름과 경기 진행 시 지급할 각종 보너스 RP 규칙을 설정하고 관리합니다.
+            </p>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            리그에 기록된 모든 매치 데이터를 조회하고, 경기 점수를 소급 수정하거나 완전 삭제하여 RP 및 전적을 안전하게 롤백 복원합니다. (태블릿 환경 최적화)
-          </p>
+          <Button
+            onClick={async () => {
+              if (onSaveLeagueSettings) {
+                try {
+                  await onSaveLeagueSettings(localTitle, localBonuses);
+                  toast.success("리그 환경 설정이 클라우드 및 로컬에 성공적으로 저장되었습니다!");
+                } catch (e) {
+                  toast.error("설정 저장에 실패했습니다.");
+                }
+              }
+            }}
+            className="bg-neon-blue hover:bg-neon-blue/80 text-primary-foreground font-black px-6 h-10 transition-all active:scale-95 rounded-xl shadow-md font-sans text-xs shrink-0 self-end md:self-center"
+          >
+            <Save className="size-4 mr-1.5" /> 설정 저장
+          </Button>
         </div>
 
-        {/* Category Selector Tabs & Inputs for Dynamic Loading/Filtering */}
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* League Title Setting */}
+          <div className="space-y-2 rounded-xl bg-background/30 p-5 border border-border/20">
+            <label className="text-xs font-bold text-neon-blue block uppercase tracking-wider">리그 이름 설정</label>
+            <div className="relative">
+              <Input
+                type="text"
+                value={localTitle}
+                onChange={(e) => setLocalTitle(e.target.value)}
+                placeholder="예: 2026 초등 리그전"
+                className="pr-12 h-10 border-border/50 bg-background/40 hover:bg-background/60 focus:bg-background/80 transition-all font-sans text-xs"
+              />
+            </div>
+            <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+              학생들이 로그인했을 때 화면 상단에 표시되는 공식 리그 명칭입니다.
+            </p>
+          </div>
+
+          {/* Bonus RP Toggles */}
+          <div className="space-y-4 rounded-xl bg-background/30 p-5 border border-border/20">
+            <span className="text-xs font-bold text-neon-blue block uppercase tracking-wider">보너스 RP 스위치</span>
+            <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
+              
+              {/* firstWin */}
+              <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-foreground">🌟 오늘의 첫 승</span>
+                  <span className="text-[9px] text-muted-foreground mt-0.5">+15 RP 보너스</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLocalBonuses(prev => ({ ...prev, firstWin: !prev.firstWin }))}
+                  className={cn(
+                    "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                    localBonuses.firstWin ? "bg-neon-blue" : "bg-muted"
+                  )}
+                >
+                  <div className={cn(
+                    "size-5 rounded-full bg-white transition-transform shadow-sm",
+                    localBonuses.firstWin ? "translate-x-4" : "translate-x-0"
+                  )} />
+                </button>
+              </div>
+
+              {/* revenge */}
+              <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-foreground">😈 복수전 성공</span>
+                  <span className="text-[9px] text-muted-foreground mt-0.5">+10 RP 보너스</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLocalBonuses(prev => ({ ...prev, revenge: !prev.revenge }))}
+                  className={cn(
+                    "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                    localBonuses.revenge ? "bg-neon-blue" : "bg-muted"
+                  )}
+                >
+                  <div className={cn(
+                    "size-5 rounded-full bg-white transition-transform shadow-sm",
+                    localBonuses.revenge ? "translate-x-4" : "translate-x-0"
+                  )} />
+                </button>
+              </div>
+
+              {/* underdog */}
+              <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-foreground">🛡️ 언더독 격파</span>
+                  <span className="text-[9px] text-muted-foreground mt-0.5">점수 차 비례(10%)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLocalBonuses(prev => ({ ...prev, underdog: !prev.underdog }))}
+                  className={cn(
+                    "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                    localBonuses.underdog ? "bg-neon-blue" : "bg-muted"
+                  )}
+                >
+                  <div className={cn(
+                    "size-5 rounded-full bg-white transition-transform shadow-sm",
+                    localBonuses.underdog ? "translate-x-4" : "translate-x-0"
+                  )} />
+                </button>
+              </div>
+
+              {/* scoreDiff */}
+              <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-foreground">🔥 압승 보너스</span>
+                  <span className="text-[9px] text-muted-foreground mt-0.5">대승 시 추가 보너스</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLocalBonuses(prev => ({ ...prev, scoreDiff: !prev.scoreDiff }))}
+                  className={cn(
+                    "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                    localBonuses.scoreDiff ? "bg-neon-blue" : "bg-muted"
+                  )}
+                >
+                  <div className={cn(
+                    "size-5 rounded-full bg-white transition-transform shadow-sm",
+                    localBonuses.scoreDiff ? "translate-x-4" : "translate-x-0"
+                  )} />
+                </button>
+              </div>
+
+              {/* rival */}
+              <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-foreground">⚔️ 라이벌 격파</span>
+                  <span className="text-[9px] text-muted-foreground mt-0.5">+5 RP 보너스</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLocalBonuses(prev => ({ ...prev, rival: !prev.rival }))}
+                  className={cn(
+                    "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                    localBonuses.rival ? "bg-neon-blue" : "bg-muted"
+                  )}
+                >
+                  <div className={cn(
+                    "size-5 rounded-full bg-white transition-transform shadow-sm",
+                    localBonuses.rival ? "translate-x-4" : "translate-x-0"
+                  )} />
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 3.9. All Match Records Integrated Management Section (전체 경기 기록 통합 관리) */}
+      <Card className="border border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl relative overflow-hidden">
+        {/* Clickable Header for Collapsible Toggle */}
+        <div 
+          onClick={() => setIsMatchListOpen(!isMatchListOpen)}
+          className="flex items-center justify-between cursor-pointer select-none group"
+        >
+          <div className="flex-1 pr-4">
+            <div className="flex items-center gap-2 text-neon-blue group-hover:text-neon-blue/80 transition-colors">
+              <Swords className="size-5 animate-pulse" />
+              <h3 className="font-black text-lg">전체 경기 기록 통합 관리</h3>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground group-hover:text-muted-foreground/80 transition-colors">
+              리그에 기록된 모든 매치 데이터를 조회하고, 경기 점수를 소급 수정하거나 완전 삭제하여 RP 및 전적을 안전하게 롤백 복원합니다. (태블릿 환경 최적화)
+            </p>
+          </div>
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-muted/40 border border-border/20 text-xs font-black text-muted-foreground group-hover:text-foreground group-hover:bg-muted/80 group-hover:border-neon-blue/30 transition-all shrink-0">
+            <span>전체 경기 기록 {isMatchListOpen ? "닫기" : "열기"}</span>
+            <span className="text-xs transition-transform duration-300">
+              {isMatchListOpen ? "▲" : "▼"}
+            </span>
+          </div>
+        </div>
+
+        {/* Smooth transition collapsible content wrapper */}
+        <div className={cn(
+          "grid transition-all duration-300 ease-in-out",
+          isMatchListOpen ? "grid-rows-[1fr] opacity-100 mt-5" : "grid-rows-[0fr] opacity-0"
+        )}>
+          <div className="overflow-hidden min-h-0">
+            {/* Category Selector Tabs & Inputs for Dynamic Loading/Filtering */}
         <div className="mb-5 space-y-3">
           <div className="p-1 bg-muted/40 border border-border/20 rounded-xl flex flex-wrap gap-1.5 w-full md:w-max">
             <button
@@ -1012,6 +1223,8 @@ export function AdminPanel({
               )}
             </tbody>
           </table>
+        </div>
+          </div>
         </div>
       </Card>
 

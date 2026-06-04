@@ -11,7 +11,9 @@ import { MyRecord } from "@/components/league/MyRecord";
 import { Toaster } from "@/components/ui/sonner";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { Crown, Swords, Trophy, Users, Pencil, Target, LogOut, School, ShieldAlert } from "lucide-react";
+import { Crown, Swords, Trophy, Users, Pencil, Target, LogOut, School, ShieldAlert, Award } from "lucide-react";
+import { MyAchievements } from "@/components/league/MyAchievements";
+import { PromotionCelebration } from "@/components/league/PromotionCelebration";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -23,7 +25,7 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-type Tab = "leaderboard" | "recommend" | "record" | "admin" | "masterAdmin" | "myRecord";
+type Tab = "leaderboard" | "recommend" | "record" | "admin" | "masterAdmin" | "myRecord" | "myAchievements";
 
 function Index() {
   const {
@@ -54,7 +56,11 @@ function Index() {
     restoreFromCSV,
     bulkDecayRP,
     teacherAccessCode,
-    updateMatchScore
+    updateMatchScore,
+    activeBonuses,
+    saveLeagueSettings,
+    promotionEvent,
+    setPromotionEvent
   } = useLeagueStore();
 
   const [tab, setTab] = useState<Tab>("leaderboard");
@@ -80,10 +86,10 @@ function Index() {
     }
   }, [session]);
 
-  // 학생 탭 접근 통제 보안 가드 (오직 myRecord 와 recommend 탭만 허용)
+  // 학생 탭 접근 통제 보안 가드 (오직 myRecord, recommend, myAchievements 탭만 허용)
   useEffect(() => {
     if (session && session.role === "STUDENT") {
-      if (tab !== "recommend" && tab !== "myRecord") {
+      if (tab !== "recommend" && tab !== "myRecord" && tab !== "myAchievements") {
         setTab("myRecord");
       }
     }
@@ -249,6 +255,11 @@ function Index() {
                     <TabButton active={tab === "recommend"} onClick={() => setTab("recommend")} icon={<Target className="size-4" />}>
                       매치 추천
                     </TabButton>
+
+                    {/* 3. 나의 업적 (학생 - 신규) */}
+                    <TabButton active={tab === "myAchievements"} onClick={() => setTab("myAchievements")} icon={<Award className="size-4" />}>
+                      나의 업적
+                    </TabButton>
                   </>
                 ) : (
                   <>
@@ -325,6 +336,12 @@ function Index() {
                 rpVariables={rpVariables}
               />
             )}
+
+            {session.role === "STUDENT" && tab === "myAchievements" && (
+              <MyAchievements
+                studentId={session.studentId || ""}
+              />
+            )}
             
             {session.role !== "STUDENT" && tab === "record" && (
               <RecordMatch
@@ -359,11 +376,27 @@ function Index() {
                 onBulkDecay={bulkDecayRP}
                 teacherAccessCode={teacherAccessCode}
                 onUpdateMatchScore={updateMatchScore}
+                title={title}
+                activeBonuses={activeBonuses}
+                onSaveLeagueSettings={saveLeagueSettings}
               />
             )}
           </>
         )}
       </main>
+
+      {promotionEvent?.isPromoted && (
+        <PromotionCelebration
+          studentName={promotionEvent.studentName}
+          newTier={promotionEvent.newTier}
+          onConfirm={() => {
+            setPromotionEvent(null);
+            if (session?.role === "STUDENT") {
+              setTab("myRecord");
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

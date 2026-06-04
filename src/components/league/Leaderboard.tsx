@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { SecurityModal } from "./SecurityModal";
+import { useLeagueStore } from "@/lib/league-store";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,8 @@ export function Leaderboard({
 
   // 이중 보안 상태 및 자동 잠금 훅
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const { session } = useLeagueStore();
+  const isDemo = session?.loginId === "guest" || session?.schoolName?.includes("꿈나무");
 
   useEffect(() => {
     setIsUnlocked(false);
@@ -67,7 +70,7 @@ export function Leaderboard({
   }, [students, grade, classNum, tier, gender, query, thresholds]);
 
   // 보안 잠금 가드 렌더링
-  if (!isUnlocked) {
+  if (!isUnlocked && !isDemo) {
     return (
       <SecurityModal
         correctCode={teacherAccessCode}
