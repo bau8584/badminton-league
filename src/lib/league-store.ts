@@ -192,10 +192,10 @@ export function useLeagueStore() {
     }
   }, []);
 
-  // 1. 구글 스프레드시트 데이터베이스 전체 일괄 동기화 (POST)
-  const syncWithGoogleSheets = useCallback(async (
-    currentStudents: Student[], 
-    currentMatches: Match[],
+  // 1. 단일 경기 기록 서버 원장 동기화 (RECORD_LEDGER)
+  const recordMatchToGoogleSheets = useCallback(async (
+    match: Match,
+    rpChange: Record<string, number>,
     previousStudents?: Student[],
     previousMatches?: Match[]
   ) => {
@@ -210,9 +210,9 @@ export function useLeagueStore() {
           "Content-Type": "text/plain;charset=utf-8",
         },
         body: JSON.stringify({
-          action: "SYNC_ALL",
-          students: currentStudents,
-          matches: currentMatches
+          action: "RECORD_LEDGER",
+          match,
+          rpChange
         })
       });
 
@@ -230,9 +230,9 @@ export function useLeagueStore() {
         throw new Error(data.message || "SYNC_ERROR");
       }
 
-      console.log("Successfully synced all league data to tenant Google Sheets!");
+      console.log("Successfully recorded match to Google Sheets ledger!");
     } catch (error) {
-      console.error("Synchronization failed:", error);
+      console.error("Recording match to Google Sheets failed:", error);
 
       // 서버 혼잡 또는 네트워크 오류 발생 시 즉시 알림 및 롤백
       toast.error("서버 혼잡 또는 네트워크 오류로 기록이 취소되었습니다. 다시 시도해주세요.", {
@@ -1242,10 +1242,15 @@ export function useLeagueStore() {
     setMatches(nextMatches);
     setStudents(nextStudents);
 
-    syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
+    const rpChange: Record<string, number> = {};
+    playerStats.forEach((p) => {
+      rpChange[p.id] = p.delta;
+    });
+
+    recordMatchToGoogleSheets(match, rpChange, students, matches);
 
     return match;
-  }, [students, matches, syncWithGoogleSheets, rpVariables, tierThresholds]);
+  }, [students, matches, recordMatchToGoogleSheets, rpVariables, tierThresholds]);
 
   // 경기 삭제(롤백) 및 동기화
   const deleteMatch = useCallback((matchId: string) => {
@@ -1306,9 +1311,7 @@ export function useLeagueStore() {
 
     setMatches(nextMatches);
     setStudents(nextStudents);
-
-    syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
-  }, [students, matches, syncWithGoogleSheets, rpVariables]);
+  }, [students, matches, rpVariables]);
 
   // 개별 학생 전적 리셋 및 동기화
   const resetStudent = useCallback((studentId: string) => {
@@ -1367,9 +1370,7 @@ export function useLeagueStore() {
 
     setMatches(nextMatches);
     setStudents(nextStudents);
-
-    syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
-  }, [students, matches, syncWithGoogleSheets]);
+  }, [students, matches]);
 
   // 시즌 전체 초기화 및 동기화
   const resetAllData = useCallback(() => {
@@ -1384,9 +1385,7 @@ export function useLeagueStore() {
 
     setMatches(nextMatches);
     setStudents(nextStudents);
-
-    syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
-  }, [students, matches, syncWithGoogleSheets]);
+  }, [students, matches]);
 
   // 교사 관리자 수동 RP 수정 및 동기화
   const updateStudentRP = useCallback((studentId: string, nextRp: number) => {
@@ -1399,8 +1398,7 @@ export function useLeagueStore() {
     });
 
     setStudents(nextStudents);
-    syncWithGoogleSheets(nextStudents, matches, students, matches);
-  }, [students, matches, syncWithGoogleSheets]);
+  }, [students, matches]);
 
   // 새로운 명렬표 대량 업서트 및 동기화
   const upsertStudents = useCallback(
@@ -1440,11 +1438,10 @@ export function useLeagueStore() {
       }
       
       setStudents(next);
-      syncWithGoogleSheets(next, matches, students, matches);
 
       return { added, kept };
     },
-    [students, matches, syncWithGoogleSheets],
+    [students, matches],
   );
 
   // 리그전 커스텀 설정 캘리브레이션 업데이트 함수
@@ -1460,8 +1457,7 @@ export function useLeagueStore() {
       return { ...s, gender };
     });
     setStudents(nextStudents);
-    syncWithGoogleSheets(nextStudents, matches, students, matches);
-  }, [students, matches, syncWithGoogleSheets]);
+  }, [students, matches]);
 
   // 개별 학생 삭제 및 연쇄 삭제 & 전적 복구 롤백
   const deleteStudent = useCallback((studentId: string) => {
@@ -1541,18 +1537,13 @@ export function useLeagueStore() {
 
     setMatches(nextMatches);
     setStudents(nextStudents);
+  }, [students, matches, rpVariables]);
 
-    syncWithGoogleSheets(nextStudents, nextMatches, students, matches);
-  }, [students, matches, syncWithGoogleSheets, rpVariables]);
-
-  // CSV 롤백 복원 액션
-  const restoreFromCSV = useCallback((restoredStudents: Student[], restoredMatches: Match[]) => {
     setStudents(restoredStudents);
     setMatches(restoredMatches);
     saveJSON(STUDENTS_KEY, restoredStudents);
     saveJSON(MATCHES_KEY, restoredMatches);
-    syncWithGoogleSheets(restoredStudents, restoredMatches, students, matches);
-  }, [students, matches, syncWithGoogleSheets]);
+  }, [students, matches]);
 
   // 교사 통제형 휴면 강등 일괄 RP 차감 액션
   const bulkDecayRP = useCallback((inactiveDays: number, decayAmount: number) => {
@@ -1581,11 +1572,10 @@ export function useLeagueStore() {
 
     if (affectedCount > 0) {
       setStudents(nextStudents);
-      syncWithGoogleSheets(nextStudents, matches, students, matches);
     }
 
     return affectedCount;
-  }, [students, matches, tierThresholds, syncWithGoogleSheets]);
+  }, [students, matches, tierThresholds]);
 
   // 경기 점수 수정 및 보너스/RP 완벽 재계산 액션
   const updateMatchScore = useCallback((matchId: string, nextScoreA: number, nextScoreB: number) => {
@@ -1874,10 +1864,7 @@ export function useLeagueStore() {
 
     setStudents(nextStudentsList);
     setMatches(nextMatchesList);
-
-    // 5. Sync both updated datasets to Sheets in background
-    syncWithGoogleSheets(nextStudentsList, nextMatchesList, students, matches);
-  }, [matches, students, tierThresholds, rpVariables, syncWithGoogleSheets]);
+  }, [matches, students, tierThresholds, rpVariables]);
 
   // 리그 커스텀 설정 통합 저장 (마스터 DB 동기화 포함)
   const saveLeagueSettings = useCallback(async (newTitle: string, newBonuses: ActiveBonuses, newOpMode?: "school" | "club") => {

@@ -142,6 +142,24 @@ export function RecordMatch({
   const playerB2 = matchType === "double" ? (students.find((s) => s.id === b2.studentId) ?? null) : null;
 
   const submit = () => {
+    const playerAId = playerA?.id;
+    const playerBId = playerB?.id;
+    const playerA2Id = playerA2?.id;
+    const playerB2Id = playerB2?.id;
+
+    // 1차 검증 (Pre-flight Validation): 타입 및 누락 여부 확인
+    if (matchType === "single") {
+      if (!playerAId || !playerBId || typeof scoreA !== "number" || isNaN(scoreA) || typeof scoreB !== "number" || isNaN(scoreB)) {
+        toast.error("입력된 데이터에 오류가 있습니다. 다시 확인해 주세요.");
+        return;
+      }
+    } else {
+      if (!playerAId || !playerA2Id || !playerBId || !playerB2Id || typeof scoreA !== "number" || isNaN(scoreA) || typeof scoreB !== "number" || isNaN(scoreB)) {
+        toast.error("입력된 데이터에 오류가 있습니다. 다시 확인해 주세요.");
+        return;
+      }
+    }
+
     if (matchType === "single") {
       if (!playerA || !playerB) return toast.error("두 선수를 모두 선택해주세요");
       if (playerA.id === playerB.id) return toast.error("같은 선수끼리 경기할 수 없습니다");
