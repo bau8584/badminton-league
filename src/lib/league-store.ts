@@ -1254,7 +1254,6 @@ export function useLeagueStore() {
 
   // 경기 삭제(롤백) 및 동기화
   const deleteMatch = useCallback((matchId: string) => {
-  const deleteMatch = useCallback((matchId: string) => {
     const match = matches.find((m) => m.id === matchId);
     if (!match) return;
 
@@ -1539,6 +1538,8 @@ export function useLeagueStore() {
     setStudents(nextStudents);
   }, [students, matches, rpVariables]);
 
+  // CSV 롤백 복원 액션
+  const restoreFromCSV = useCallback((restoredStudents: Student[], restoredMatches: Match[]) => {
     setStudents(restoredStudents);
     setMatches(restoredMatches);
     saveJSON(STUDENTS_KEY, restoredStudents);
