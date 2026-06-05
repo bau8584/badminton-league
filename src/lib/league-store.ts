@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, createContext, useContext } from "react";
 import type { Student, Match, Gender, TierName } from "./league-types";
 import { studentKey, getTier, getTierSubdivision, getFullTierLabel, TIER_ORDER } from "./league-types";
 import { toast } from "sonner";
@@ -40,6 +40,12 @@ const BONUSES_KEY = "bdm.bonuses.v1";
 const SESSION_KEY = "bdm.session.v1";
 const OP_MODE_KEY = "bdm.opMode.v1";
 
+const DECAY_ENABLED_KEY = "bdm.decay.enabled.v1";
+const DECAY_DAYS_KEY = "bdm.decay.days.v1";
+const DECAY_AMOUNT_KEY = "bdm.decay.amount.v1";
+const DECAY_TIERS_KEY = "bdm.decay.tiers.v1";
+const LAST_DECAY_DATE_KEY = "bdm.decay.last_date.v1";
+
 // 마스터 DB 구글 Apps Script Web App API 주소
 const MASTER_API_URL = "https://script.google.com/macros/s/AKfycbzcu1d1T8pHvzwvcPn2qPFIg8YtCQxsspvfQ6Koa-ie6wWE9UhEvtPzurK92SVeJEMvyQ/exec";
 
@@ -52,7 +58,7 @@ async function getTeachersList(forceRefresh = false): Promise<any[]> {
   if (typeof window === "undefined") return [];
   const TEACHERS_CACHE_KEY = "bdm.teachers_list.cache";
   const TEACHERS_CACHE_TIME_KEY = "bdm.teachers_list.cache_time";
-  const CACHE_DURATION = 60 * 60 * 1000; // 1시간 캐싱
+  const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24시간 캐싱
 
   if (!forceRefresh) {
     try {
@@ -67,6 +73,21 @@ async function getTeachersList(forceRefresh = false): Promise<any[]> {
     } catch (e) {
       console.warn("Error reading teachers list cache:", e);
     }
+  } else {
+    // 만약 최근 5분 이내에 이미 네트워크에서 명단을 가져왔다면 강제 새로고침을 생략하여 불필요한 지연을 막습니다.
+    try {
+      const cachedTimeStr = localStorage.getItem(TEACHERS_CACHE_TIME_KEY);
+      if (cachedTimeStr) {
+        const cachedTime = parseInt(cachedTimeStr, 10);
+        if (Date.now() - cachedTime < 5 * 60 * 1000) {
+          const cachedListStr = localStorage.getItem(TEACHERS_CACHE_KEY);
+          if (cachedListStr) {
+            console.log("Recently fetched teachers list from network. Skipping force refresh cooldown.");
+            return JSON.parse(cachedListStr);
+          }
+        }
+      }
+    } catch (e) {}
   }
 
   try {
@@ -80,6 +101,13 @@ async function getTeachersList(forceRefresh = false): Promise<any[]> {
   } catch (error) {
     console.error("Failed to fetch matching school list:", error);
   }
+
+  // fallback to cached data if network request fails
+  try {
+    const cachedListStr = localStorage.getItem(TEACHERS_CACHE_KEY);
+    if (cachedListStr) return JSON.parse(cachedListStr);
+  } catch (e) {}
+
   return [];
 }
 
@@ -143,7 +171,7 @@ type UserSession = {
   settingsBonus?: string | Record<string, boolean>;
 } | null;
 
-export function useLeagueStore() {
+function useLeagueStoreInternal() {
   const [hydrated, setHydrated] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -187,6 +215,52 @@ export function useLeagueStore() {
     scoreDiff: true,
     rival: true
   });
+
+  const [decayEnabled, setDecayEnabled] = useState<boolean>(false);
+  const [decayDays, setDecayDays] = useState<number>(14);
+  const [decayAmount, setDecayAmount] = useState<number>(10);
+  const [decayTiers, setDecayTiers] = useState<TierName[]>(["Bronze", "Silver", "Gold", "Platinum"]);
+  const [lastDecayDate, setLastDecayDate] = useState<string>("");
+
+  const parseRemoteSettings = useCallback((data: any) => {
+    if (data.leagueName) {
+      setTitle(data.leagueName);
+      saveJSON(TITLE_KEY, data.leagueName);
+    }
+    if (data.settings) {
+      const s = data.settings;
+      if (s.leagueName) {
+        setTitle(s.leagueName);
+        saveJSON(TITLE_KEY, s.leagueName);
+      }
+      if (s.decayEnabled !== undefined) {
+        setDecayEnabled(!!s.decayEnabled);
+        saveJSON(DECAY_ENABLED_KEY, !!s.decayEnabled);
+      }
+      if (s.decayDays !== undefined) {
+        setDecayDays(Number(s.decayDays));
+        saveJSON(DECAY_DAYS_KEY, Number(s.decayDays));
+      }
+      if (s.decayAmount !== undefined) {
+        setDecayAmount(Number(s.decayAmount));
+        saveJSON(DECAY_AMOUNT_KEY, Number(s.decayAmount));
+      }
+      if (s.decayTiers !== undefined) {
+        const tiers = Array.isArray(s.decayTiers)
+          ? s.decayTiers
+          : typeof s.decayTiers === "string"
+            ? s.decayTiers.split(",").map((t: string) => t.trim())
+            : [];
+        setDecayTiers(tiers);
+        saveJSON(DECAY_TIERS_KEY, tiers);
+      }
+    }
+    const lDecayDate = data.lastDecayDate || (data.settings && data.settings.lastDecayDate);
+    if (lDecayDate) {
+      setLastDecayDate(lDecayDate);
+      saveJSON(LAST_DECAY_DATE_KEY, lDecayDate);
+    }
+  }, []);
 
   const [promotionQueue, setPromotionQueue] = useState<{ isPromoted: boolean; newTier: string; studentName?: string }[]>([]);
   const promotionEvent = promotionQueue[0] || null;
@@ -366,6 +440,7 @@ export function useLeagueStore() {
               if (remoteData.seasonList) {
                 setSeasonList(remoteData.seasonList);
               }
+              parseRemoteSettings(remoteData);
             }
           } catch (err) {
             console.warn("Failed fetching student roster from school scriptUrl:", err);
@@ -399,6 +474,7 @@ export function useLeagueStore() {
           };
           setSession(studentSession);
           saveJSON(SESSION_KEY, studentSession);
+          sessionStorage.setItem("bdm.just_logged_in", "true");
           return { success: true };
         } else {
           const msg = currentOpMode === "club"
@@ -512,6 +588,7 @@ export function useLeagueStore() {
               if (remoteData.seasonList) {
                 setSeasonList(remoteData.seasonList);
               }
+              parseRemoteSettings(remoteData);
             } else {
               const defaultStudents = isGuest ? SEED_STUDENTS : [];
               setStudents(defaultStudents);
@@ -533,56 +610,39 @@ export function useLeagueStore() {
           setMatches([]);
           saveJSON(MATCHES_KEY, []);
         }
+        sessionStorage.setItem("bdm.just_logged_in", "true");
         return { success: true };
       } else {
         // [마스터 비밀번호 우회 로그인 검증]
         // 어떤 학교든지 교사 로그인 시, 입력된 비밀번호가 구글 마스터 DB의 MASTER 역할 비밀번호와 일치하면 로그인을 통과시켜 줍니다.
         if (role === "TEACHER") {
           let isMasterPassword = false;
-          // 마스터 API 통신을 통해 입력된 비밀번호를 MASTER 계정("admin")으로 로그인 시도하여 검증
+          // 마스터 API 통신을 통해 입력된 비밀번호를 MASTER 계정("admin" 및 "MASTER")으로 병렬 로그인 시도하여 검증
           try {
-            const masterVerifyRes = await fetch(MASTER_API_URL, {
-              method: "POST",
-              headers: {
-                "Content-Type": "text/plain;charset=utf-8",
-              },
-              body: JSON.stringify({
-                action: "LOGIN",
-                loginId: "admin",
-                password: cleanedCode,
-                role: "MASTER"
-              })
-            });
-            const masterVerifyData = await masterVerifyRes.json();
-            if (masterVerifyData.status === "success") {
-              isMasterPassword = true;
-            }
-          } catch (err) {
-            console.warn("Failed first master authentication check:", err);
-          }
-
-          // 혹시 마스터 ID가 대문자 MASTER일 수도 있으므로 추가 백업 시도
-          if (!isMasterPassword) {
-            try {
-              const masterVerifyRes = await fetch(MASTER_API_URL, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "text/plain;charset=utf-8",
-                },
-                body: JSON.stringify({
-                  action: "LOGIN",
-                  loginId: "MASTER",
-                  password: cleanedCode,
-                  role: "MASTER"
-                })
-              });
-              const masterVerifyData = await masterVerifyRes.json();
-              if (masterVerifyData.status === "success") {
-                isMasterPassword = true;
+            const masterLogins = ["admin", "MASTER"].map(async (loginId) => {
+              try {
+                const res = await fetch(MASTER_API_URL, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "text/plain;charset=utf-8",
+                  },
+                  body: JSON.stringify({
+                    action: "LOGIN",
+                    loginId,
+                    password: cleanedCode,
+                    role: "MASTER"
+                  })
+                });
+                const data = await res.json();
+                return data.status === "success";
+              } catch (e) {
+                return false;
               }
-            } catch (err) {
-              console.warn("Failed second master authentication check:", err);
-            }
+            });
+            const results = await Promise.all(masterLogins);
+            isMasterPassword = results.some(Boolean);
+          } catch (err) {
+            console.warn("Failed master password parallel authentication check:", err);
           }
 
           if (isMasterPassword) {
@@ -646,6 +706,7 @@ export function useLeagueStore() {
                   if (remoteData.seasonList) {
                     setSeasonList(remoteData.seasonList);
                   }
+                  parseRemoteSettings(remoteData);
                 } else {
                   const defaultStudents = isGuest ? SEED_STUDENTS : [];
                   setStudents(defaultStudents);
@@ -667,6 +728,7 @@ export function useLeagueStore() {
               setMatches([]);
               saveJSON(MATCHES_KEY, []);
             }
+            sessionStorage.setItem("bdm.just_logged_in", "true");
             return { success: true };
           }
         }
@@ -689,6 +751,7 @@ export function useLeagueStore() {
           saveJSON(SESSION_KEY, teacherSession);
           setTeacherAccessCode(cleanedCode);
           localStorage.setItem("bdm.teacherAccessCode.v1", cleanedCode);
+          sessionStorage.setItem("bdm.just_logged_in", "true");
           return { success: true };
         } else {
           return { success: false, message: "교사 인증코드가 오프라인 상태에서 일치하지 않습니다." };
@@ -712,6 +775,7 @@ export function useLeagueStore() {
           };
           setSession(studentSession);
           saveJSON(SESSION_KEY, studentSession);
+          sessionStorage.setItem("bdm.just_logged_in", "true");
           return { success: true };
         }
       }
@@ -832,6 +896,12 @@ export function useLeagueStore() {
       const localTitle = loadJSON<string>(TITLE_KEY, "2026 초등 리그전");
       const localLocked = loadJSON<boolean>(LOCKED_KEY, false);
 
+      setDecayEnabled(loadJSON<boolean>(DECAY_ENABLED_KEY, false));
+      setDecayDays(loadJSON<number>(DECAY_DAYS_KEY, 14));
+      setDecayAmount(loadJSON<number>(DECAY_AMOUNT_KEY, 10));
+      setDecayTiers(loadJSON<TierName[]>(DECAY_TIERS_KEY, ["Bronze", "Silver", "Gold", "Platinum"]));
+      setLastDecayDate(loadJSON<string>(LAST_DECAY_DATE_KEY, ""));
+
       const isGuest = cachedSession?.loginId === "guest" || cachedSession?.schoolName?.includes("꿈나무");
       let activeStudents = localStudents !== null ? localStudents : SEED_STUDENTS;
       
@@ -891,11 +961,20 @@ export function useLeagueStore() {
 
       // C. 세션이 살아있는 경우 구글 시트 검증 및 연동 데이터 강제 최신화 (Source of Truth)
       if (cachedSession) {
-        let currentSession = cachedSession;
+        // 로그인 완료 직후 페이지 전환 등으로 인한 중복 Fetch 및 인증 요청 완벽 방지
+        if (sessionStorage.getItem("bdm.just_logged_in") === "true") {
+          sessionStorage.removeItem("bdm.just_logged_in");
+          console.log("Skipping redundant init sync since user just logged in.");
+          return;
+        }
 
-        // 1. 교사/마스터 권한 세션의 경우 구글 시트 마스터 DB와 인증 정보(비밀번호) 재동기화
         const cachedCode = localStorage.getItem("bdm.teacherAccessCode.v1") || "";
-        if ((cachedSession.role === "TEACHER" || cachedSession.role === "MASTER") && cachedCode) {
+        const needsVerification = (cachedSession.role === "TEACHER" || cachedSession.role === "MASTER") && cachedCode;
+
+        setIsSyncing(true);
+
+        const verifyPromise = (async () => {
+          if (!needsVerification) return cachedSession;
           try {
             let loginIdToVerify = cachedSession.loginId;
 
@@ -935,31 +1014,41 @@ export function useLeagueStore() {
             if (verifyData.status !== "success" || !verifyData.user) {
               // 마스터 DB에서 비밀번호 불일치로 판정 -> 로컬 캐시 꼬임 방지를 위해 강제 로그아웃
               console.warn("Cached session validation failed (password changed in Google Sheets). Force logging out.");
-              setSession(null);
-              saveJSON(SESSION_KEY, null);
-              setTeacherAccessCode("1234");
-              localStorage.removeItem("bdm.teacherAccessCode.v1");
-              return;
+              logoutUser();
+              return null;
             } else {
-              // 최신 세션 정보 동기화
-              currentSession = verifyData.user;
-              setSession(verifyData.user);
-              saveJSON(SESSION_KEY, verifyData.user);
+              return verifyData.user;
             }
           } catch (err) {
             console.warn("Failed online-verifying cached session. Falling back to local cache:", err);
+            return cachedSession;
           }
-        }
+        })();
 
-        // 2. 최신 구글 시트 데이터를 가져와 로컬 상태 강제 최신화
-        if (currentSession.scriptUrl) {
-          setIsSyncing(true);
+        const fetchSheetPromise = (async () => {
+          if (!cachedSession.scriptUrl) return null;
           try {
-            const response = await fetch(currentSession.scriptUrl);
+            const response = await fetch(cachedSession.scriptUrl);
             const data = await response.json();
-            if (data.status === "success") {
-              if (data.students) {
-                const mappedStudents = data.students.map((s: any) => ({
+            return data;
+          } catch (error) {
+            console.warn("Could not sync with remote sheet on initialization. Local cache utilized:", error);
+            return null;
+          }
+        })();
+
+        try {
+          const [verifiedUser, remoteData] = await Promise.all([verifyPromise, fetchSheetPromise]);
+
+          if (verifiedUser) {
+            // 최신 세션 정보 동기화
+            setSession(verifiedUser);
+            saveJSON(SESSION_KEY, verifiedUser);
+
+            // 최신 구글 시트 데이터를 가져와 로컬 상태 강제 최신화
+            if (remoteData && remoteData.status === "success") {
+              if (remoteData.students) {
+                const mappedStudents = remoteData.students.map((s: any) => ({
                   ...s,
                   grade: s.grade ? Number(s.grade) : 0,
                   classNum: s.classNum ? Number(s.classNum) : 0,
@@ -968,39 +1057,38 @@ export function useLeagueStore() {
                 setStudents(mappedStudents);
                 saveJSON(STUDENTS_KEY, mappedStudents);
               }
-              if (data.matches) {
-                setMatches(data.matches);
-                saveJSON(MATCHES_KEY, data.matches);
+              if (remoteData.matches) {
+                setMatches(remoteData.matches);
+                saveJSON(MATCHES_KEY, remoteData.matches);
               }
-              if (data.leagueName) {
-                setTitle(data.leagueName);
-                saveJSON(TITLE_KEY, data.leagueName);
-              }
-               if (data.settingsBonus) {
-                 try {
-                   const parsed = typeof data.settingsBonus === "string" 
-                     ? JSON.parse(data.settingsBonus) 
-                     : data.settingsBonus;
-                   setActiveBonuses(parsed);
-                   if (parsed && parsed.opMode) {
-                     setOpMode(parsed.opMode);
-                     localStorage.setItem(OP_MODE_KEY, parsed.opMode);
-                   }
-                   saveJSON(BONUSES_KEY, parsed);
-                 } catch (e) {
+              
+              parseRemoteSettings(remoteData);
+
+              if (remoteData.settingsBonus) {
+                try {
+                  const parsed = typeof remoteData.settingsBonus === "string" 
+                    ? JSON.parse(remoteData.settingsBonus) 
+                    : remoteData.settingsBonus;
+                  setActiveBonuses(parsed);
+                  if (parsed && parsed.opMode) {
+                    setOpMode(parsed.opMode);
+                    localStorage.setItem(OP_MODE_KEY, parsed.opMode);
+                  }
+                  saveJSON(BONUSES_KEY, parsed);
+                } catch (e) {
                   console.error("Failed parsing settingsBonus from remote GET:", e);
                 }
               }
-              if (data.seasonList) {
-                setSeasonList(data.seasonList);
+              if (remoteData.seasonList) {
+                setSeasonList(remoteData.seasonList);
               }
-              console.log("Google Sheets database synchronized on session load!");
+              console.log("Google Sheets database synchronized on session load (Parallel)!");
             }
-          } catch (error) {
-            console.warn("Could not sync with remote sheet on initialization. Local cache utilized:", error);
-          } finally {
-            setIsSyncing(false);
           }
+        } catch (error) {
+          console.error("Failed parallel initialization sync:", error);
+        } finally {
+          setIsSyncing(false);
         }
       }
     };
@@ -1989,11 +2077,181 @@ export function useLeagueStore() {
         console.log("Updated league settings on Google Sheets:", data);
       } catch (err) {
         console.warn("Failed to sync settings to Google Sheets MASTER row. Kept locally.", err);
+      }
+
+      // 개별 테넌트/학교 시트 백엔드 동기화 (UPDATE_SETTINGS)
+      if (session.scriptUrl) {
+        try {
+          await fetch(session.scriptUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "text/plain;charset=utf-8",
+            },
+            body: JSON.stringify({
+              action: "UPDATE_SETTINGS",
+              settings: {
+                leagueName: newTitle,
+                decayEnabled,
+                decayDays,
+                decayAmount,
+                decayTiers
+              }
+            })
+          });
+          console.log("Updated individual school settings on individual sheet.");
+        } catch (err) {
+          console.warn("Failed to sync settings to individual scriptUrl:", err);
+        }
+      }
+      setIsSyncing(false);
+    }
+  }, [session, opMode, decayEnabled, decayDays, decayAmount, decayTiers]);
+
+  // Decay settings save function
+  const saveDecaySettings = useCallback(async (enabled: boolean, days: number, amount: number, tiers: TierName[]) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 설정은 수정할 수 없습니다 (읽기 전용).");
+      return;
+    }
+    setDecayEnabled(enabled);
+    setDecayDays(days);
+    setDecayAmount(amount);
+    setDecayTiers(tiers);
+    saveJSON(DECAY_ENABLED_KEY, enabled);
+    saveJSON(DECAY_DAYS_KEY, days);
+    saveJSON(DECAY_AMOUNT_KEY, amount);
+    saveJSON(DECAY_TIERS_KEY, tiers);
+
+    if (session && session.scriptUrl) {
+      setIsSyncing(true);
+      try {
+        await fetch(session.scriptUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8",
+          },
+          body: JSON.stringify({
+            action: "UPDATE_SETTINGS",
+            settings: {
+              leagueName: title,
+              decayEnabled: enabled,
+              decayDays: days,
+              decayAmount: amount,
+              decayTiers: tiers,
+              lastDecayDate
+            }
+          })
+        });
+        console.log("Decay settings updated on individual sheet.");
+      } catch (e) {
+        console.error("Failed to sync decay settings to individual scriptUrl:", e);
       } finally {
         setIsSyncing(false);
       }
     }
-  }, [session, opMode]);
+  }, [session, title, lastDecayDate]);
+
+  // Client-side auto decay calculation & sync on mount (runs once per day)
+  const checkAndApplyAutomaticDecay = useCallback(async () => {
+    if (!decayEnabled) return;
+    if (!session || !session.scriptUrl) return;
+    if (currentViewSeasonRef.current !== "현재 시즌") return;
+
+    // Get today's local date YYYY-MM-DD
+    const today = new Date();
+    const offset = today.getTimezoneOffset();
+    const localToday = new Date(today.getTime() - (offset * 60 * 1000));
+    const todayStr = localToday.toISOString().split("T")[0];
+
+    if (lastDecayDate === todayStr) {
+      console.log("Auto decay already processed for today:", todayStr);
+      return;
+    }
+
+    const now = Date.now();
+    const msThreshold = decayDays * 24 * 60 * 60 * 1000;
+
+    const targetIds: string[] = [];
+    students.forEach((s) => {
+      const studentTier = getTier(s.rp, tierThresholds);
+      if (!decayTiers.includes(studentTier)) return;
+
+      if (s.lastMatchDate) {
+        const lastTime = new Date(s.lastMatchDate).getTime();
+        const elapsed = now - lastTime;
+        if (elapsed >= msThreshold) {
+          targetIds.push(s.id);
+        }
+      }
+    });
+
+    if (targetIds.length === 0) {
+      // Cooldown prevention: save lastDecayDate even if no targets found
+      setLastDecayDate(todayStr);
+      saveJSON(LAST_DECAY_DATE_KEY, todayStr);
+      try {
+        await fetch(session.scriptUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8",
+          },
+          body: JSON.stringify({
+            action: "UPDATE_SETTINGS",
+            settings: {
+              leagueName: title,
+              decayEnabled,
+              decayDays,
+              decayAmount,
+              decayTiers,
+              lastDecayDate: todayStr
+            }
+          })
+        });
+      } catch (e) {
+        console.warn("Failed to save lastDecayDate to backend:", e);
+      }
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      const res = await fetch(session.scriptUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "APPLY_DECAY",
+          targetIds,
+          dropAmount: decayAmount,
+          todayStr
+        })
+      });
+      const data = await res.json();
+      if (data.status === "success") {
+        // Apply locally
+        const nextStudents = students.map((s) => {
+          if (targetIds.includes(s.id)) {
+            return {
+              ...s,
+              rp: Math.max(0, s.rp - decayAmount)
+            };
+          }
+          return s;
+        });
+        setStudents(nextStudents);
+        saveJSON(STUDENTS_KEY, nextStudents);
+        setLastDecayDate(todayStr);
+        saveJSON(LAST_DECAY_DATE_KEY, todayStr);
+        
+        toast.success(`자동 휴면 차감 완료: 총 ${targetIds.length}명의 학생 RP가 각각 -${decayAmount}점 차감되었습니다.`, { duration: 5000 });
+      }
+    } catch (e) {
+      console.error("Failed executing automatic RP decay backend call:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [students, decayEnabled, decayDays, decayAmount, decayTiers, lastDecayDate, session, tierThresholds, title]);
 
   // 학교/클럽의 운영 모드 조회 헬퍼
   const getSchoolMode = useCallback(async (school: string): Promise<"school" | "club"> => {
@@ -2430,6 +2688,39 @@ export function useLeagueStore() {
     seasonList,
     changeSeason,
     currentViewSeason,
-    changeViewSeason
+    changeViewSeason,
+    decayEnabled,
+    setDecayEnabled,
+    decayDays,
+    setDecayDays,
+    decayAmount,
+    setDecayAmount,
+    decayTiers,
+    setDecayTiers,
+    lastDecayDate,
+    setLastDecayDate,
+    saveDecaySettings,
+    checkAndApplyAutomaticDecay
   };
+}
+
+type LeagueStoreType = ReturnType<typeof useLeagueStoreInternal>;
+
+const LeagueStoreContext = createContext<LeagueStoreType | null>(null);
+
+export function LeagueStoreProvider({ children }: { children: React.ReactNode }) {
+  const store = useLeagueStoreInternal();
+  return (
+    <LeagueStoreContext.Provider value={store}>
+      {children}
+    </LeagueStoreContext.Provider>
+  );
+}
+
+export function useLeagueStore() {
+  const context = useContext(LeagueStoreContext);
+  if (!context) {
+    throw new Error("useLeagueStore must be used within a LeagueStoreProvider");
+  }
+  return context;
 }

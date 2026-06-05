@@ -14,6 +14,9 @@ export type Student = {
   demotionShields?: number; // 횟수제 강등 보호막 (기본값 0)
   lastMatchDate?: string;   // 마지막으로 경기를 치른 날짜 (ISO 8601 형식)
   lastWinDate?: string;     // 마지막으로 승리한 날짜 (YYYY-MM-DD 형식)
+  totalMatches?: number;
+  currentStreak?: number;
+  achievements?: any[];
 };
 
 export type Match = {

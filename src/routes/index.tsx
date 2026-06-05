@@ -426,6 +426,7 @@ function Index() {
                 rpVariables={rpVariables}
                 onUpdateSettings={updateLeagueSettings}
                 onDeleteStudent={deleteStudent}
+                onUpdateGender={updateStudentGender}
                 onRestoreFromCSV={restoreFromCSV}
                 onBulkDecay={bulkDecayRP}
                 teacherAccessCode={teacherAccessCode}

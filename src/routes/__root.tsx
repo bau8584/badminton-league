@@ -7,6 +7,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
+import { LeagueStoreProvider } from "../lib/league-store";
 
 import appCss from "../styles.css?url";
 
@@ -156,7 +157,9 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
+      <LeagueStoreProvider>
+        <Outlet />
+      </LeagueStoreProvider>
     </QueryClientProvider>
   );
 }

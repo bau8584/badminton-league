@@ -93,6 +93,7 @@ export function AdminPanel({
   rpVariables,
   onUpdateSettings,
   onDeleteStudent,
+  onUpdateGender,
   onRestoreFromCSV,
   onBulkDecay,
   teacherAccessCode,
@@ -117,6 +118,7 @@ export function AdminPanel({
   rpVariables?: { winDelta: number; loseDelta: number };
   onUpdateSettings?: (thresholds: Record<TierName, number>, rpVars: { winDelta: number; loseDelta: number }) => void;
   onDeleteStudent?: (studentId: string) => void;
+  onUpdateGender?: (studentId: string, gender: Gender) => void;
   onRestoreFromCSV?: (students: Student[], matches: Match[]) => void;
   onBulkDecay?: (inactiveDays: number, decayAmount: number) => number;
   teacherAccessCode: string;
@@ -127,15 +129,90 @@ export function AdminPanel({
   seasonList?: string[];
   onChangeSeason?: (seasonName: string) => Promise<{ success: boolean; message?: string }>;
 }) {
-  // CSV 롤백 복원 상태
+  // JSON 롤백 복원 상태
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [pendingRestoreData, setPendingRestoreData] = useState<Student[] | null>(null);
+  const [pendingRestoreMatches, setPendingRestoreMatches] = useState<Match[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 이중 보안 상태 및 자동 잠금 훅
   const [isUnlocked, setIsUnlocked] = useState(false);
-  const { session } = useLeagueStore();
+  const { 
+    session,
+    decayEnabled,
+    decayDays,
+    decayAmount: storeDecayAmount,
+    decayTiers,
+    saveDecaySettings,
+    checkAndApplyAutomaticDecay
+  } = useLeagueStore();
   const isDemo = session?.loginId === "guest" || session?.schoolName?.includes("꿈나무");
+
+  // 접기/펴기 (Collapsible) 상태 (기본값: false = 닫힘)
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isStudentDashboardOpen, setIsStudentDashboardOpen] = useState(false);
+  const [isTierSettingsOpen, setIsTierSettingsOpen] = useState(false);
+
+  // 휴면 유저 관리(Decay) 설정 관련 로컬 상태
+  const [localDecayEnabled, setLocalDecayEnabled] = useState(decayEnabled);
+  const [localDecayDays, setLocalDecayDays] = useState(decayDays.toString());
+  const [localDecayAmount, setLocalDecayAmount] = useState(storeDecayAmount.toString());
+  const [localDecayTiers, setLocalDecayTiers] = useState<TierName[]>(decayTiers);
+
+  // 백엔드로부터 설정이 주입될 때 로컬 상태 싱크
+  useEffect(() => {
+    setLocalDecayEnabled(decayEnabled);
+  }, [decayEnabled]);
+
+  useEffect(() => {
+    setLocalDecayDays(decayDays.toString());
+  }, [decayDays]);
+
+  useEffect(() => {
+    setLocalDecayAmount(storeDecayAmount.toString());
+  }, [storeDecayAmount]);
+
+  useEffect(() => {
+    setLocalDecayTiers(decayTiers);
+  }, [decayTiers]);
+
+  // 설정 저장 헬퍼
+  const handleSaveDecaySettings = (enabled: boolean, daysStr: string, amountStr: string, tiers: TierName[]) => {
+    const days = parseInt(daysStr, 10);
+    const amount = parseInt(amountStr, 10);
+    if (isNaN(days) || days <= 0 || isNaN(amount) || amount <= 0) return;
+    saveDecaySettings(enabled, days, amount, tiers);
+  };
+
+  const handleToggleDecay = () => {
+    const nextVal = !localDecayEnabled;
+    setLocalDecayEnabled(nextVal);
+    handleSaveDecaySettings(nextVal, localDecayDays, localDecayAmount, localDecayTiers);
+  };
+
+  const handleDaysBlur = () => {
+    handleSaveDecaySettings(localDecayEnabled, localDecayDays, localDecayAmount, localDecayTiers);
+  };
+
+  const handleAmountBlur = () => {
+    handleSaveDecaySettings(localDecayEnabled, localDecayDays, localDecayAmount, localDecayTiers);
+  };
+
+  const handleTierCheckboxChange = (tier: TierName) => {
+    const nextTiers = localDecayTiers.includes(tier)
+      ? localDecayTiers.filter(t => t !== tier)
+      : [...localDecayTiers, tier];
+    setLocalDecayTiers(nextTiers);
+    handleSaveDecaySettings(localDecayEnabled, localDecayDays, localDecayAmount, nextTiers);
+  };
+
+  // 관리자 대시보드 마운트/잠금 해제 시 자동 휴면 차감 실행 (하루 1회 제한)
+  const hasEntered = isUnlocked || isDemo;
+  useEffect(() => {
+    if (hasEntered) {
+      checkAndApplyAutomaticDecay();
+    }
+  }, [hasEntered, checkAndApplyAutomaticDecay]);
 
   // 시즌 변경/초기화 관련 상태
   const [isSeasonChangeModalOpen, setIsSeasonChangeModalOpen] = useState(false);
@@ -381,46 +458,6 @@ export function AdminPanel({
   const [filterGrade, setFilterGrade] = useState<number | null>(null);
   const [filterClassNum, setFilterClassNum] = useState<number | null>(null);
 
-  // 휴면 강등(RP Decay) 관리 상태
-  const [inactiveDays, setInactiveDays] = useState("7");
-  const [decayAmount, setDecayAmount] = useState("15");
-
-  const handleBulkDecay = () => {
-    const days = parseInt(inactiveDays, 10);
-    const amount = parseInt(decayAmount, 10);
-
-    if (isNaN(days) || days <= 0) {
-      return toast.error("기준 미활동 일수는 1일 이상이어야 합니다.");
-    }
-    if (isNaN(amount) || amount <= 0) {
-      return toast.error("차감할 RP는 1점 이상이어야 합니다.");
-    }
-
-    if (!onBulkDecay) return;
-
-    // 골드 커트라인 획득
-    const goldCutoff = thresholds?.Gold ?? 1200;
-    const now = new Date().getTime();
-    const msThreshold = days * 24 * 60 * 60 * 1000;
-
-    const dormantStudents = students.filter((s) => {
-      if (s.rp < goldCutoff) return false;
-      if (!s.lastMatchDate) return false;
-      const lastTime = new Date(s.lastMatchDate).getTime();
-      return (now - lastTime) >= msThreshold;
-    });
-
-    if (dormantStudents.length === 0) {
-      return toast.info(`최근 ${days}일 동안 경기가 없고 골드 등급 이상인 휴면 감점 대상 학생이 없습니다.`);
-    }
-
-    const confirmMsg = `골드 등급 이상이면서 최근 ${days}일 이상 경기를 치르지 않은 휴면 학생 ${dormantStudents.length}명에게서 각각 -${amount} RP를 일괄 감점 차감하시겠습니까?\n\n[차감 대상 학생]\n${dormantStudents.map((s) => `- ${s.grade}학년 ${s.classNum}반 ${s.name} (${s.rp} RP)`).join("\n")}`;
-
-    if (!confirm(confirmMsg)) return;
-
-    const decayCount = onBulkDecay(days, amount);
-    toast.success(`휴면 유저 일괄 감점이 반영되었습니다! 총 ${decayCount}명의 학생 RP가 정상적으로 차감 처리되었습니다.`);
-  };
 
   // 티어 및 RP 수동 설정 폼 상태
   const [inputBronze, setInputBronze] = useState(thresholds?.Bronze?.toString() ?? "0");
@@ -547,119 +584,124 @@ export function AdminPanel({
     toast.success(`신규 ${added}명 등록, 기존 ${kept}명 전적 유지`);
   };
 
-  // CSV download function with UTF-8 BOM
-  const downloadCSV = () => {
+  // JSON download function
+  const downloadJSON = () => {
     const sortedStudents = [...students].sort((a, b) => b.rp - a.rp);
+    const backupObj = {
+      students: sortedStudents.map((s) => ({
+        id: s.id,
+        grade: s.grade,
+        classNum: s.classNum,
+        number: s.number,
+        name: s.name,
+        gender: s.gender,
+        rp: s.rp,
+        recent: s.recent,
+        wins: s.wins,
+        losses: s.losses,
+        demotionShields: s.demotionShields ?? 0,
+        lastMatchDate: s.lastMatchDate ?? null,
+        lastWinDate: s.lastWinDate ?? null,
+        totalMatches: s.totalMatches ?? (s.wins + s.losses),
+        currentStreak: s.currentStreak ?? 0,
+        achievements: s.achievements ?? []
+      })),
+      matches: matches
+    };
     
-    // Headers
-    const headers = ["순위", "학년", "반", "번호", "이름", "성별", "RP 점수", "티어", "승리", "패배", "승률"];
-    
-    // Rows
-    const rows = sortedStudents.map((s, index) => {
-      const total = s.wins + s.losses;
-      const winRate = total === 0 ? 0 : Math.round((s.wins / total) * 100);
-      const tierLabel = getFullTierLabel(s.rp, thresholds);
-      const genderLabel = s.gender === "M" ? "남" : s.gender === "F" ? "여" : "미지정";
-      
-      return [
-        index + 1,
-        s.grade,
-        s.classNum,
-        s.number,
-        s.name,
-        genderLabel,
-        s.rp,
-        tierLabel,
-        s.wins,
-        s.losses,
-        `${winRate}%`
-      ];
-    });
-
-    const csvContent = [headers, ...rows]
-      .map((row) => row.map((val) => `"${val}"`).join(","))
-      .join("\n");
-      
-    // Excel UTF-8 BOM prefix
-    const BOM = "\ufeff";
-    const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([JSON.stringify(backupObj, null, 2)], { type: "application/json;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `sports_league_rankings_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute("download", `sports_league_backup_${new Date().toISOString().slice(0, 10)}.json`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success("전체 학생 순위표 CSV 백업 다운로드가 완료되었습니다!");
+    toast.success("전체 데이터 JSON 백업 다운로드가 완료되었습니다!");
   };
 
-  // CSV 백업 파일을 업로드하여 파싱 및 롤백 복원 수행 헬퍼 함수
-  const handleCSVRestoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // JSON 백업 파일을 업로드하여 파싱 및 롤백 복원 수행
+  const handleJSONRestoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const csvText = event.target?.result as string;
-        if (!csvText) return;
+        const jsonText = event.target?.result as string;
+        if (!jsonText) return;
 
-        // 줄 단위 분리
-        const lines = csvText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-        if (lines.length <= 1) {
-          return toast.error("CSV 파일에 복구할 데이터가 부족하거나 비어있습니다.");
+        const data = JSON.parse(jsonText);
+        if (!data || !Array.isArray(data.students)) {
+          return toast.error("JSON 파일에 유효한 학생(students) 데이터 배열이 없습니다.");
         }
 
-        const parsedStudents: Student[] = [];
+        const parsedStudents: Student[] = data.students.map((s: any) => ({
+          id: s.id || Math.random().toString(36).slice(2, 10),
+          grade: Number(s.grade),
+          classNum: Number(s.classNum),
+          number: Number(s.number),
+          name: String(s.name),
+          gender: (s.gender === "M" || s.gender === "F") ? s.gender : "U",
+          rp: Number(s.rp),
+          recent: Array.isArray(s.recent) ? s.recent : [],
+          wins: Number(s.wins),
+          losses: Number(s.losses),
+          demotionShields: s.demotionShields !== undefined ? Number(s.demotionShields) : 0,
+          lastMatchDate: s.lastMatchDate ? String(s.lastMatchDate) : undefined,
+          lastWinDate: s.lastWinDate ? String(s.lastWinDate) : undefined,
+          totalMatches: s.totalMatches !== undefined ? Number(s.totalMatches) : (Number(s.wins) + Number(s.losses)),
+          currentStreak: s.currentStreak !== undefined ? Number(s.currentStreak) : 0,
+          achievements: Array.isArray(s.achievements) ? s.achievements : []
+        }));
 
-        // 두 번째 줄부터 데이터 파싱
-        for (let i = 1; i < lines.length; i++) {
-          // 따옴표로 감싸진 필드 파싱 정규식 적용 (쉼표 분할)
-          const parts = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.replace(/^"|"$/g, '').trim());
-          if (parts.length < 10) continue; // 필수 컬럼 부족 시 스킵
-
-          const grade = parseInt(parts[1], 10);
-          const classNum = parseInt(parts[2], 10);
-          const number = parseInt(parts[3], 10);
-          const name = parts[4];
-          const genderRaw = parts[5];
-          const rp = parseInt(parts[6], 10);
-          const wins = parseInt(parts[8], 10);
-          const losses = parseInt(parts[9], 10);
-
-          if (isNaN(grade) || isNaN(classNum) || isNaN(number) || !name || isNaN(rp) || isNaN(wins) || isNaN(losses)) {
-            continue; // 유효성 검사 실패 스킵
-          }
-
-          let gender: Gender = "U";
-          if (genderRaw === "남" || genderRaw === "M" || genderRaw === "m" || genderRaw === "남자") gender = "M";
-          if (genderRaw === "여" || genderRaw === "F" || genderRaw === "f" || genderRaw === "여자") gender = "F";
-
-          parsedStudents.push({
-            id: Math.random().toString(36).slice(2, 10), // 새로운 임시 ID 발급
-            grade,
-            classNum,
-            number,
-            name,
-            gender,
-            rp,
-            recent: [], // 복원 시 최근 경기 최근 목록은 빈 배열로 초기화
-            wins,
-            losses
-          });
-        }
+        const parsedMatches: Match[] = Array.isArray(data.matches) ? data.matches.map((m: any) => ({
+          id: String(m.id),
+          playerAId: String(m.playerAId),
+          playerBId: String(m.playerBId),
+          playerA2Id: m.playerA2Id ? String(m.playerA2Id) : undefined,
+          playerB2Id: m.playerB2Id ? String(m.playerB2Id) : undefined,
+          scoreA: Number(m.scoreA),
+          scoreB: Number(m.scoreB),
+          date: String(m.date),
+          matchType: m.matchType,
+          rpDeltaA: m.rpDeltaA !== undefined ? Number(m.rpDeltaA) : undefined,
+          rpDeltaB: m.rpDeltaB !== undefined ? Number(m.rpDeltaB) : undefined,
+          rpDeltaA2: m.rpDeltaA2 !== undefined ? Number(m.rpDeltaA2) : undefined,
+          rpDeltaB2: m.rpDeltaB2 !== undefined ? Number(m.rpDeltaB2) : undefined,
+          underdogBonusA: m.underdogBonusA !== undefined ? Number(m.underdogBonusA) : undefined,
+          underdogBonusB: m.underdogBonusB !== undefined ? Number(m.underdogBonusB) : undefined,
+          underdogBonusA2: m.underdogBonusA2 !== undefined ? Number(m.underdogBonusA2) : undefined,
+          underdogBonusB2: m.underdogBonusB2 !== undefined ? Number(m.underdogBonusB2) : undefined,
+          scoreDiffBonusA: m.scoreDiffBonusA !== undefined ? Number(m.scoreDiffBonusA) : undefined,
+          scoreDiffBonusB: m.scoreDiffBonusB !== undefined ? Number(m.scoreDiffBonusB) : undefined,
+          scoreDiffBonusA2: m.scoreDiffBonusA2 !== undefined ? Number(m.scoreDiffBonusA2) : undefined,
+          scoreDiffBonusB2: m.scoreDiffBonusB2 !== undefined ? Number(m.scoreDiffBonusB2) : undefined,
+          rivalBonusA: m.rivalBonusA !== undefined ? Number(m.rivalBonusA) : undefined,
+          rivalBonusB: m.rivalBonusB !== undefined ? Number(m.rivalBonusB) : undefined,
+          rivalBonusA2: m.rivalBonusA2 !== undefined ? Number(m.rivalBonusA2) : undefined,
+          rivalBonusB2: m.rivalBonusB2 !== undefined ? Number(m.rivalBonusB2) : undefined,
+          firstWinBonusA: m.firstWinBonusA !== undefined ? Number(m.firstWinBonusA) : undefined,
+          firstWinBonusB: m.firstWinBonusB !== undefined ? Number(m.firstWinBonusB) : undefined,
+          firstWinBonusA2: m.firstWinBonusA2 !== undefined ? Number(m.firstWinBonusA2) : undefined,
+          firstWinBonusB2: m.firstWinBonusB2 !== undefined ? Number(m.firstWinBonusB2) : undefined,
+          revengeBonusA: m.revengeBonusA !== undefined ? Number(m.revengeBonusA) : undefined,
+          revengeBonusB: m.revengeBonusB !== undefined ? Number(m.revengeBonusB) : undefined,
+          revengeBonusA2: m.revengeBonusA2 !== undefined ? Number(m.revengeBonusA2) : undefined,
+          revengeBonusB2: m.revengeBonusB2 !== undefined ? Number(m.revengeBonusB2) : undefined,
+        })) : [];
 
         if (parsedStudents.length === 0) {
-          return toast.error("파싱 가능한 유효한 학생 데이터가 없습니다. 순위표 백업 CSV 규격이 맞는지 확인해주세요.");
+          return toast.error("파싱 가능한 유효한 학생 데이터가 없습니다.");
         }
 
-        // 파싱된 데이터 보존 및 확인 AlertDialog 개방
         setPendingRestoreData(parsedStudents);
+        setPendingRestoreMatches(parsedMatches);
         setRestoreDialogOpen(true);
       } catch (err) {
-        console.error("CSV restore parsing failed:", err);
-        toast.error("CSV 백업 파일을 로드하여 정적 분석하는 중에 오류가 발생했습니다.");
+        console.error("JSON restore parsing failed:", err);
+        toast.error("JSON 백업 파일 로드하여 정적 분석하는 중에 오류가 발생했습니다.");
       }
     };
     reader.readAsText(file, "UTF-8");
@@ -699,21 +741,6 @@ export function AdminPanel({
     }
   };
 
-  // Global reset check
-  const handleGlobalReset = () => {
-    const password = window.prompt("모든 데이터를 완전히 리셋하고 새 시즌을 시작하려면 교사 비밀번호('admin1234')를 입력하세요:");
-    if (password === null) return;
-    if (password === "admin1234") {
-      if (window.confirm("정말로 모든 경기 기록을 삭제하고 전교생의 점수를 1000점(0승 0패)으로 일괄 초기화하시겠습니까? 이 작업은 취소할 수 없습니다.")) {
-        onResetAll();
-        setSelectedStudentId(null);
-        toast.success("새 시즌이 활성화되었습니다. 모든 리그 기록이 성공적으로 일괄 초기화되었습니다.");
-      }
-    } else {
-      toast.error("비밀번호가 일치하지 않습니다. 전체 리셋이 취소되었습니다.");
-    }
-  };
-
   // Individual student reset check
   const handleStudentReset = () => {
     if (!selectedStudent) return;
@@ -739,8 +766,12 @@ export function AdminPanel({
       
       {/* 1. League Configuration: Title and Bonus Toggles (리그 환경 설정) */}
       <Card className="border border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl relative overflow-hidden">
-        <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
+        {/* Clickable Header for Collapsible Toggle */}
+        <div 
+          onClick={() => setIsConfigOpen(!isConfigOpen)}
+          className="flex items-center justify-between cursor-pointer select-none group"
+        >
+          <div className="flex-1 pr-4">
             <div className="flex items-center gap-2 text-neon-blue">
               <Settings className="size-5" />
               <h3 className="font-black text-lg">리그 환경 설정 (League Configurations)</h3>
@@ -749,151 +780,170 @@ export function AdminPanel({
               리그의 이름과 경기 진행 시 지급할 각종 보너스 RP 규칙을 설정하고 관리합니다.
             </p>
           </div>
-          <Button
-            onClick={async () => {
-              if (onSaveLeagueSettings) {
-                try {
-                  await onSaveLeagueSettings(localTitle, localBonuses);
-                  toast.success("리그 환경 설정이 클라우드 및 로컬에 성공적으로 저장되었습니다!");
-                } catch (e) {
-                  toast.error("설정 저장에 실패했습니다.");
-                }
-              }
-            }}
-            className="bg-neon-blue hover:bg-neon-blue/80 text-primary-foreground font-black px-6 h-10 transition-all active:scale-95 rounded-xl shadow-md font-sans text-xs shrink-0 self-end md:self-center"
-          >
-            <Save className="size-4 mr-1.5" /> 설정 저장
-          </Button>
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-muted/40 border border-border/20 text-xs font-black text-muted-foreground group-hover:text-foreground group-hover:bg-muted/80 group-hover:border-neon-blue/30 transition-all shrink-0">
+            <span>리그 설정 {isConfigOpen ? "닫기" : "열기"}</span>
+            <span className="text-xs transition-transform duration-300">
+              {isConfigOpen ? "▲" : "▼"}
+            </span>
+          </div>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* League Title Setting */}
-          <div className="space-y-2 rounded-xl bg-background/30 p-5 border border-border/20">
-            <label className="text-xs font-bold text-neon-blue block uppercase tracking-wider">리그 이름 설정</label>
-            <div className="relative">
-              <Input
-                type="text"
-                value={localTitle}
-                onChange={(e) => setLocalTitle(e.target.value)}
-                placeholder="예: 2026 초등 리그전"
-                className="pr-12 h-10 border-border/50 bg-background/40 hover:bg-background/60 focus:bg-background/80 transition-all font-sans text-xs"
-              />
+        {/* Smooth transition collapsible content wrapper */}
+        <div className={cn(
+          "grid transition-all duration-300 ease-in-out",
+          isConfigOpen ? "grid-rows-[1fr] opacity-100 mt-5" : "grid-rows-[0fr] opacity-0"
+        )}>
+          <div className="overflow-hidden min-h-0">
+            <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 pt-2">
+              <span className="text-xs text-muted-foreground">구성을 조정한 뒤 저장을 클릭하세요.</span>
+              <Button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (onSaveLeagueSettings) {
+                    try {
+                      await onSaveLeagueSettings(localTitle, localBonuses);
+                      toast.success("리그 환경 설정이 클라우드 및 로컬에 성공적으로 저장되었습니다!");
+                    } catch (e) {
+                      toast.error("설정 저장에 실패했습니다.");
+                    }
+                  }
+                }}
+                className="bg-neon-blue hover:bg-neon-blue/80 text-primary-foreground font-black px-6 h-10 transition-all active:scale-95 rounded-xl shadow-md font-sans text-xs shrink-0 self-end md:self-center"
+              >
+                <Save className="size-4 mr-1.5" /> 설정 저장
+              </Button>
             </div>
-            <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
-              학생들이 로그인했을 때 화면 상단에 표시되는 공식 리그 명칭입니다.
-            </p>
-          </div>
 
-          {/* Bonus RP Toggles */}
-          <div className="space-y-4 rounded-xl bg-background/30 p-5 border border-border/20">
-            <span className="text-xs font-bold text-neon-blue block uppercase tracking-wider">보너스 RP 스위치</span>
-            <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
-              
-              {/* firstWin */}
-              <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-foreground">🌟 오늘의 첫 승</span>
-                  <span className="text-[9px] text-muted-foreground mt-0.5">+15 RP 보너스</span>
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* League Title Setting */}
+              <div className="space-y-2 rounded-xl bg-background/30 p-5 border border-border/20">
+                <label className="text-xs font-bold text-neon-blue block uppercase tracking-wider">리그 이름 설정</label>
+                <div className="relative">
+                  <Input
+                    type="text"
+                    value={localTitle}
+                    onChange={(e) => setLocalTitle(e.target.value)}
+                    placeholder="예: 2026 초등 리그전"
+                    className="pr-12 h-10 border-border/50 bg-background/40 hover:bg-background/60 focus:bg-background/80 transition-all font-sans text-xs"
+                  />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setLocalBonuses(prev => ({ ...prev, firstWin: !prev.firstWin }))}
-                  className={cn(
-                    "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
-                    localBonuses.firstWin ? "bg-neon-blue" : "bg-muted"
-                  )}
-                >
-                  <div className={cn(
-                    "size-5 rounded-full bg-white transition-transform shadow-sm",
-                    localBonuses.firstWin ? "translate-x-4" : "translate-x-0"
-                  )} />
-                </button>
+                <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+                  학생들이 로그인했을 때 화면 상단에 표시되는 공식 리그 명칭입니다.
+                </p>
               </div>
 
-              {/* revenge */}
-              <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-foreground">😈 복수전 성공</span>
-                  <span className="text-[9px] text-muted-foreground mt-0.5">+10 RP 보너스</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setLocalBonuses(prev => ({ ...prev, revenge: !prev.revenge }))}
-                  className={cn(
-                    "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
-                    localBonuses.revenge ? "bg-neon-blue" : "bg-muted"
-                  )}
-                >
-                  <div className={cn(
-                    "size-5 rounded-full bg-white transition-transform shadow-sm",
-                    localBonuses.revenge ? "translate-x-4" : "translate-x-0"
-                  )} />
-                </button>
-              </div>
+              {/* Bonus RP Toggles */}
+              <div className="space-y-4 rounded-xl bg-background/30 p-5 border border-border/20">
+                <span className="text-xs font-bold text-neon-blue block uppercase tracking-wider">보너스 RP 스위치</span>
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
+                  
+                  {/* firstWin */}
+                  <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-foreground">🌟 오늘의 첫 승</span>
+                      <span className="text-[9px] text-muted-foreground mt-0.5">+15 RP 보너스</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLocalBonuses(prev => ({ ...prev, firstWin: !prev.firstWin }))}
+                      className={cn(
+                        "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                        localBonuses.firstWin ? "bg-neon-blue" : "bg-muted"
+                      )}
+                    >
+                      <div className={cn(
+                        "size-5 rounded-full bg-white transition-transform shadow-sm",
+                        localBonuses.firstWin ? "translate-x-4" : "translate-x-0"
+                      )} />
+                    </button>
+                  </div>
 
-              {/* underdog */}
-              <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-foreground">🛡️ 언더독 격파</span>
-                  <span className="text-[9px] text-muted-foreground mt-0.5">점수 차 비례(10%)</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setLocalBonuses(prev => ({ ...prev, underdog: !prev.underdog }))}
-                  className={cn(
-                    "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
-                    localBonuses.underdog ? "bg-neon-blue" : "bg-muted"
-                  )}
-                >
-                  <div className={cn(
-                    "size-5 rounded-full bg-white transition-transform shadow-sm",
-                    localBonuses.underdog ? "translate-x-4" : "translate-x-0"
-                  )} />
-                </button>
-              </div>
+                  {/* revenge */}
+                  <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-foreground">😈 복수전 성공</span>
+                      <span className="text-[9px] text-muted-foreground mt-0.5">+10 RP 보너스</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLocalBonuses(prev => ({ ...prev, revenge: !prev.revenge }))}
+                      className={cn(
+                        "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                        localBonuses.revenge ? "bg-neon-blue" : "bg-muted"
+                      )}
+                    >
+                      <div className={cn(
+                        "size-5 rounded-full bg-white transition-transform shadow-sm",
+                        localBonuses.revenge ? "translate-x-4" : "translate-x-0"
+                      )} />
+                    </button>
+                  </div>
 
-              {/* scoreDiff */}
-              <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-foreground">🔥 압승 보너스</span>
-                  <span className="text-[9px] text-muted-foreground mt-0.5">대승 시 추가 보너스</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setLocalBonuses(prev => ({ ...prev, scoreDiff: !prev.scoreDiff }))}
-                  className={cn(
-                    "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
-                    localBonuses.scoreDiff ? "bg-neon-blue" : "bg-muted"
-                  )}
-                >
-                  <div className={cn(
-                    "size-5 rounded-full bg-white transition-transform shadow-sm",
-                    localBonuses.scoreDiff ? "translate-x-4" : "translate-x-0"
-                  )} />
-                </button>
-              </div>
+                  {/* underdog */}
+                  <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-foreground">🛡️ 언더독 격파</span>
+                      <span className="text-[9px] text-muted-foreground mt-0.5">점수 차 비례(10%)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLocalBonuses(prev => ({ ...prev, underdog: !prev.underdog }))}
+                      className={cn(
+                        "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                        localBonuses.underdog ? "bg-neon-blue" : "bg-muted"
+                      )}
+                    >
+                      <div className={cn(
+                        "size-5 rounded-full bg-white transition-transform shadow-sm",
+                        localBonuses.underdog ? "translate-x-4" : "translate-x-0"
+                      )} />
+                    </button>
+                  </div>
 
-              {/* rival */}
-              <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-foreground">⚔️ 라이벌 격파</span>
-                  <span className="text-[9px] text-muted-foreground mt-0.5">+5 RP 보너스</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setLocalBonuses(prev => ({ ...prev, rival: !prev.rival }))}
-                  className={cn(
-                    "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
-                    localBonuses.rival ? "bg-neon-blue" : "bg-muted"
-                  )}
-                >
-                  <div className={cn(
-                    "size-5 rounded-full bg-white transition-transform shadow-sm",
-                    localBonuses.rival ? "translate-x-4" : "translate-x-0"
-                  )} />
-                </button>
-              </div>
+                  {/* scoreDiff */}
+                  <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-foreground">🔥 압승 보너스</span>
+                      <span className="text-[9px] text-muted-foreground mt-0.5">대승 시 추가 보너스</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLocalBonuses(prev => ({ ...prev, scoreDiff: !prev.scoreDiff }))}
+                      className={cn(
+                        "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                        localBonuses.scoreDiff ? "bg-neon-blue" : "bg-muted"
+                      )}
+                    >
+                      <div className={cn(
+                        "size-5 rounded-full bg-white transition-transform shadow-sm",
+                        localBonuses.scoreDiff ? "translate-x-4" : "translate-x-0"
+                      )} />
+                    </button>
+                  </div>
 
+                  {/* rival */}
+                  <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-foreground">⚔️ 라이벌 격파</span>
+                      <span className="text-[9px] text-muted-foreground mt-0.5">+5 RP 보너스</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLocalBonuses(prev => ({ ...prev, rival: !prev.rival }))}
+                      className={cn(
+                        "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                        localBonuses.rival ? "bg-neon-blue" : "bg-muted"
+                      )}
+                    >
+                      <div className={cn(
+                        "size-5 rounded-full bg-white transition-transform shadow-sm",
+                        localBonuses.rival ? "translate-x-4" : "translate-x-0"
+                      )} />
+                    </button>
+                  </div>
+
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1453,15 +1503,34 @@ export function AdminPanel({
 
       {/* 2. Individual Student Management Dashboard */}
       <Card className="border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl">
-        <div className="mb-4">
-          <div className="flex items-center gap-2 text-neon-blue">
-            <User className="size-5" />
-            <h3 className="font-black text-lg">개별 학생 관리 대시보드</h3>
+        {/* Clickable Header for Collapsible Toggle */}
+        <div 
+          onClick={() => setIsStudentDashboardOpen(!isStudentDashboardOpen)}
+          className="flex items-center justify-between cursor-pointer select-none group"
+        >
+          <div className="flex-1 pr-4">
+            <div className="flex items-center gap-2 text-neon-blue">
+              <User className="size-5" />
+              <h3 className="font-black text-lg">개별 학생 관리 대시보드</h3>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              학생 이름을 검색하여 개별 프로필을 조회하고, RP 점수를 임의 수정하거나 과거 경기 내역을 추적하여 양방향 롤백(삭제)을 관리할 수 있습니다.
+            </p>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            학생 이름을 검색하여 개별 프로필을 조회하고, RP 점수를 임의 수정하거나 과거 경기 내역을 추적하여 양방향 롤백(삭제)을 관리할 수 있습니다.
-          </p>
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-muted/40 border border-border/20 text-xs font-black text-muted-foreground group-hover:text-foreground group-hover:bg-muted/80 group-hover:border-neon-blue/30 transition-all shrink-0">
+            <span>대시보드 {isStudentDashboardOpen ? "닫기" : "열기"}</span>
+            <span className="text-xs transition-transform duration-300">
+              {isStudentDashboardOpen ? "▲" : "▼"}
+            </span>
+          </div>
         </div>
+
+        {/* Smooth transition collapsible content wrapper */}
+        <div className={cn(
+          "grid transition-all duration-300 ease-in-out",
+          isStudentDashboardOpen ? "grid-rows-[1fr] opacity-100 mt-5" : "grid-rows-[0fr] opacity-0"
+        )}>
+          <div className="overflow-hidden min-h-0">
 
         {/* Student Search Box */}
         <div className="relative mb-4">
@@ -1669,8 +1738,40 @@ export function AdminPanel({
                   <span className="text-xs text-muted-foreground">({selectedStudent.wins}승 {selectedStudent.losses}패)</span>
                 </div>
 
+                {/* 성별 수정 드롭다운 */}
+                <div className="space-y-1.5 mt-3 pt-3 border-t border-border/20">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">성별 수정</label>
+                  <select
+                    value={selectedStudent.gender}
+                    onChange={(e) => onUpdateGender?.(selectedStudent.id, e.target.value as Gender)}
+                    className="w-full h-10 border border-border/50 bg-background/60 rounded-xl px-3 text-xs font-semibold focus-visible:ring-neon-blue transition-all"
+                  >
+                    <option value="M">남학생 (M)</option>
+                    <option value="F">여학생 (F)</option>
+                    <option value="U">미지정 (U)</option>
+                  </select>
+                </div>
+
+                {/* 학생 삭제 버튼 */}
+                <div className="mt-2.5">
+                  <Button
+                    onClick={() => {
+                      if (window.confirm(`정말로 [${selectedStudent.name}] 학생을 완전히 삭제하시겠습니까? 이 학생이 치른 모든 경기 기록도 연쇄 삭제되며 롤백됩니다. 이 작업은 취소할 수 없습니다.`)) {
+                        onDeleteStudent?.(selectedStudent.id);
+                        setSelectedStudentId(null);
+                        toast.success(`[${selectedStudent.name}] 학생이 성공적으로 삭제되었습니다.`);
+                      }
+                    }}
+                    variant="destructive"
+                    size="sm"
+                    className="w-full bg-destructive text-destructive-foreground hover:bg-destructive/90 font-bold active:scale-95 transition-all"
+                  >
+                    <Trash2 className="mr-2 size-3.5" /> 학생 영구 삭제
+                  </Button>
+                </div>
+
                 {/* Individual Student Reset Button */}
-                <div className="mt-5 pt-4 border-t border-border/30">
+                <div className="mt-4 pt-3 border-t border-border/30">
                   <Button
                     onClick={handleStudentReset}
                     variant="destructive"
@@ -1815,56 +1916,59 @@ export function AdminPanel({
             <div className="text-xs text-muted-foreground">조회하고 싶은 학생을 검색창에 입력하여 선택해 주세요.</div>
           </div>
         )}
+          </div>
+        </div>
       </Card>
 
-      {/* 3. CSV Backup Download & Collapsible NEIS Paste */}
+      {/* 3. JSON Backup Download & Collapsible NEIS Paste */}
       <div className="grid gap-6 md:grid-cols-3">
         
-        {/* CSV Backup Card */}
+        {/* JSON Backup Card */}
         <Card className="border-border/60 bg-card/60 p-5 backdrop-blur shadow-lg flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 text-neon-green">
               <Download className="size-5" />
-              <h3 className="font-bold">전체 데이터 CSV 다운로드</h3>
+              <h3 className="font-bold">전체 데이터 JSON 다운로드</h3>
             </div>
             <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-              현재 등록된 모든 선수들의 순위, 소속 학년/반/번호, 이름, 성별, 최종 RP 점수, 티어, 경기 승패 전적 기록을 담은 엑셀 호환형 CSV 백업 파일을 생성하여 로컬 PC에 즉시 다운로드합니다.
+              현재 등록된 모든 선수들의 순위, 소속 학년/반/번호, 이름, 성별, 최종 RP 점수, 티어, 경기 승패 전적 기록 및 업적(Achievements), 연승(Streak) 정보와 전체 매치 기록을 담은 JSON 백업 파일을 생성하여 로컬 PC에 즉시 다운로드합니다.
             </p>
           </div>
           <Button
-            onClick={downloadCSV}
+            onClick={downloadJSON}
             size="lg"
             className="mt-5 w-full bg-gradient-to-r from-neon-green to-tier-platinum text-primary-foreground font-black tracking-wide shadow-md active:scale-95 transition-all"
           >
-            <Download className="mr-2 size-4" /> 전체 데이터 CSV 백업 내보내기
+            <Download className="mr-2 size-4" /> 전체 데이터 JSON 백업 내보내기
           </Button>
         </Card>
 
-        {/* CSV Restore / Rollback Card */}
+        {/* JSON Restore / Rollback Card */}
         <Card className="border-border/60 bg-card/60 p-5 backdrop-blur shadow-lg flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 text-destructive">
               <RotateCcw className="size-5" />
-              <h3 className="font-bold text-foreground">CSV 업로드하여 데이터 롤백</h3>
+              <h3 className="font-bold text-foreground">JSON 업로드하여 데이터 롤백</h3>
             </div>
             <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-              교사가 이전에 백업해 둔 CSV 파일을 업로드하면, 해당 파일을 기반으로 전체 학생 명단과 RP 및 전적 점수를 완전히 해당 시점의 데이터로 롤백 복원합니다.
+              교사가 이전에 백업해 둔 JSON 파일을 업로드하면, 해당 파일을 기반으로 전체 학생 명단과 RP, 전적 및 매치 로그 데이터를 완벽하게 해당 시점의 데이터로 롤백 복원합니다.
             </p>
           </div>
           <div className="mt-5">
             <input 
               type="file" 
               ref={fileInputRef} 
-              onChange={handleCSVRestoreUpload} 
-              accept=".csv" 
+              onChange={handleJSONRestoreUpload} 
+              accept=".json" 
               className="hidden" 
+              id="json-file-upload-input"
             />
             <Button
               onClick={() => fileInputRef.current?.click()}
               size="lg"
               className="w-full bg-gradient-to-r from-destructive to-amber-600 text-white font-black tracking-wide shadow-md active:scale-95 transition-all"
             >
-              <RotateCcw className="mr-2 size-4" /> CSV 데이터 롤백 복원
+              <RotateCcw className="mr-2 size-4" /> JSON 데이터 롤백 복원
             </Button>
           </div>
         </Card>
@@ -1965,149 +2069,169 @@ export function AdminPanel({
 
       {/* 3.5. League Settings Calibration: Custom Tier Thresholds & RP Deltas */}
       <Card className="border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl">
-        <div className="mb-4">
-          <div className="flex items-center gap-2 text-neon-blue">
-            <Save className="size-5" />
-            <h3 className="font-black text-lg">티어 및 RP 설정 (League Settings Calibration)</h3>
+        {/* Clickable Header for Collapsible Toggle */}
+        <div 
+          onClick={() => setIsTierSettingsOpen(!isTierSettingsOpen)}
+          className="flex items-center justify-between cursor-pointer select-none group"
+        >
+          <div className="flex-1 pr-4">
+            <div className="flex items-center gap-2 text-neon-blue">
+              <Save className="size-5" />
+              <h3 className="font-black text-lg">티어 및 RP 설정 (League Settings Calibration)</h3>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              티어 등급별 최소 진입 RP 커트라인 기준점과 경기 승/패 시 가감되는 기본 변동 RP 점수를 자유롭게 미세 조율하여 리그 밸런스를 커스텀 설정합니다.
+            </p>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            티어 등급별 최소 진입 RP 커트라인 기준점과 경기 승/패 시 가감되는 기본 변동 RP 점수를 자유롭게 미세 조율하여 리그 밸런스를 커스텀 설정합니다.
-          </p>
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-muted/40 border border-border/20 text-xs font-black text-muted-foreground group-hover:text-foreground group-hover:bg-muted/80 group-hover:border-neon-blue/30 transition-all shrink-0">
+            <span>티어 설정 {isTierSettingsOpen ? "닫기" : "열기"}</span>
+            <span className="text-xs transition-transform duration-300">
+              {isTierSettingsOpen ? "▲" : "▼"}
+            </span>
+          </div>
         </div>
 
-        <div className="space-y-6 pt-2">
-          {/* Tier Thresholds Inputs Group with Sliders */}
-          <div>
-            <span className="text-xs text-neon-blue font-bold uppercase tracking-wider block mb-3">티어별 최저 RP 기준점 (Tier Cutoffs Sliders)</span>
-            <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-5 bg-card/40 p-5 rounded-2xl border border-border/30">
-              
-              {/* Bronze */}
-              <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-bold text-tier-bronze">브론즈</label>
-                  <span className="font-mono text-xs font-bold text-tier-bronze bg-tier-bronze/10 px-2 py-0.5 rounded">{inputBronze} RP</span>
+        {/* Smooth transition collapsible content wrapper */}
+        <div className={cn(
+          "grid transition-all duration-300 ease-in-out",
+          isTierSettingsOpen ? "grid-rows-[1fr] opacity-100 mt-5" : "grid-rows-[0fr] opacity-0"
+        )}>
+          <div className="overflow-hidden min-h-0">
+            <div className="space-y-6 pt-2">
+              {/* Tier Thresholds Inputs Group with Sliders */}
+              <div>
+                <span className="text-xs text-neon-blue font-bold uppercase tracking-wider block mb-3">티어별 최저 RP 기준점 (Tier Cutoffs Sliders)</span>
+                <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-5 bg-card/40 p-5 rounded-2xl border border-border/30">
+                  
+                  {/* Bronze */}
+                  <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-tier-bronze">브론즈</label>
+                      <span className="font-mono text-xs font-bold text-tier-bronze bg-tier-bronze/10 px-2 py-0.5 rounded">{inputBronze} RP</span>
+                    </div>
+                    <Slider
+                      value={[parseInt(inputBronze, 10) || 0]}
+                      onValueChange={(val) => setInputBronze(val[0].toString())}
+                      min={0}
+                      max={1000}
+                      step={10}
+                      className="py-2"
+                    />
+                  </div>
+
+                  {/* Silver */}
+                  <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-tier-silver">실버</label>
+                      <span className="font-mono text-xs font-bold text-tier-silver bg-tier-silver/10 px-2 py-0.5 rounded">{inputSilver} RP</span>
+                    </div>
+                    <Slider
+                      value={[parseInt(inputSilver, 10) || 0]}
+                      onValueChange={(val) => setInputSilver(val[0].toString())}
+                      min={500}
+                      max={2000}
+                      step={10}
+                      className="py-2"
+                    />
+                  </div>
+
+                  {/* Gold */}
+                  <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-tier-gold">골드</label>
+                      <span className="font-mono text-xs font-bold text-tier-gold bg-tier-gold/10 px-2 py-0.5 rounded">{inputGold} RP</span>
+                    </div>
+                    <Slider
+                      value={[parseInt(inputGold, 10) || 0]}
+                      onValueChange={(val) => setInputGold(val[0].toString())}
+                      min={800}
+                      max={2500}
+                      step={10}
+                      className="py-2"
+                    />
+                  </div>
+
+                  {/* Platinum */}
+                  <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-tier-platinum">플래티넘</label>
+                      <span className="font-mono text-xs font-bold text-tier-platinum bg-tier-platinum/10 px-2 py-0.5 rounded">{inputPlatinum} RP</span>
+                    </div>
+                    <Slider
+                      value={[parseInt(inputPlatinum, 10) || 0]}
+                      onValueChange={(val) => setInputPlatinum(val[0].toString())}
+                      min={1000}
+                      max={3000}
+                      step={10}
+                      className="py-2"
+                    />
+                  </div>
+
+                  {/* Diamond */}
+                  <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-tier-diamond">다이아몬드</label>
+                      <span className="font-mono text-xs font-bold text-tier-diamond bg-tier-diamond/10 px-2 py-0.5 rounded">{inputDiamond} RP</span>
+                    </div>
+                    <Slider
+                      value={[parseInt(inputDiamond, 10) || 0]}
+                      onValueChange={(val) => setInputDiamond(val[0].toString())}
+                      min={1200}
+                      max={3500}
+                      step={10}
+                      className="py-2"
+                    />
+                  </div>
+
                 </div>
-                <Slider
-                  value={[parseInt(inputBronze, 10) || 0]}
-                  onValueChange={(val) => setInputBronze(val[0].toString())}
-                  min={0}
-                  max={1000}
-                  step={10}
-                  className="py-2"
-                />
               </div>
 
-              {/* Silver */}
-              <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-bold text-tier-silver">실버</label>
-                  <span className="font-mono text-xs font-bold text-tier-silver bg-tier-silver/10 px-2 py-0.5 rounded">{inputSilver} RP</span>
+              {/* RP Deltas Inputs Group */}
+              <div className="border-t border-border/30 pt-4">
+                <span className="text-xs text-neon-green font-bold uppercase tracking-wider block mb-3">승/패 RP 변동폭 설정 (Delta Variables)</span>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {/* Win Delta */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-win">경기 이겼을 때 상승 RP</label>
+                      <span className="text-[10px] text-muted-foreground font-mono">(기본값: +25)</span>
+                    </div>
+                    <Input
+                      type="number"
+                      value={inputWinDelta}
+                      onChange={(e) => setInputWinDelta(e.target.value)}
+                      className="font-mono font-bold bg-background/60 border-win/30 text-win focus-visible:ring-win"
+                      placeholder="예: 25"
+                    />
+                  </div>
+
+                  {/* Lose Delta */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-loss">경기 졌을 때 하락 RP</label>
+                      <span className="text-[10px] text-muted-foreground font-mono">(기본값: -20)</span>
+                    </div>
+                    <Input
+                      type="number"
+                      value={inputLoseDelta}
+                      onChange={(e) => setInputLoseDelta(e.target.value)}
+                      className="font-mono font-bold bg-background/60 border-loss/30 text-loss focus-visible:ring-loss"
+                      placeholder="예: 20"
+                    />
+                  </div>
                 </div>
-                <Slider
-                  value={[parseInt(inputSilver, 10) || 0]}
-                  onValueChange={(val) => setInputSilver(val[0].toString())}
-                  min={500}
-                  max={2000}
-                  step={10}
-                  className="py-2"
-                />
               </div>
 
-              {/* Gold */}
-              <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-bold text-tier-gold">골드</label>
-                  <span className="font-mono text-xs font-bold text-tier-gold bg-tier-gold/10 px-2 py-0.5 rounded">{inputGold} RP</span>
-                </div>
-                <Slider
-                  value={[parseInt(inputGold, 10) || 0]}
-                  onValueChange={(val) => setInputGold(val[0].toString())}
-                  min={800}
-                  max={2500}
-                  step={10}
-                  className="py-2"
-                />
+              {/* Save Button */}
+              <div className="pt-2">
+                <Button
+                  onClick={handleSaveSettings}
+                  className="w-full bg-gradient-to-r from-neon-blue to-neon-green text-primary-foreground font-black tracking-wide h-12 shadow-lg active:scale-95 transition-all"
+                >
+                  <Save className="size-4.5 mr-2" /> 캘리브레이션 리그 설정 저장 및 반영
+                </Button>
               </div>
-
-              {/* Platinum */}
-              <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-bold text-tier-platinum">플래티넘</label>
-                  <span className="font-mono text-xs font-bold text-tier-platinum bg-tier-platinum/10 px-2 py-0.5 rounded">{inputPlatinum} RP</span>
-                </div>
-                <Slider
-                  value={[parseInt(inputPlatinum, 10) || 0]}
-                  onValueChange={(val) => setInputPlatinum(val[0].toString())}
-                  min={1000}
-                  max={3000}
-                  step={10}
-                  className="py-2"
-                />
-              </div>
-
-              {/* Diamond */}
-              <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-bold text-tier-diamond">다이아몬드</label>
-                  <span className="font-mono text-xs font-bold text-tier-diamond bg-tier-diamond/10 px-2 py-0.5 rounded">{inputDiamond} RP</span>
-                </div>
-                <Slider
-                  value={[parseInt(inputDiamond, 10) || 0]}
-                  onValueChange={(val) => setInputDiamond(val[0].toString())}
-                  min={1200}
-                  max={3500}
-                  step={10}
-                  className="py-2"
-                />
-              </div>
-
             </div>
-          </div>
-
-          {/* RP Deltas Inputs Group */}
-          <div className="border-t border-border/30 pt-4">
-            <span className="text-xs text-neon-green font-bold uppercase tracking-wider block mb-3">승/패 RP 변동폭 설정 (Delta Variables)</span>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {/* Win Delta */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-bold text-win">경기 이겼을 때 상승 RP</label>
-                  <span className="text-[10px] text-muted-foreground font-mono">(기본값: +25)</span>
-                </div>
-                <Input
-                  type="number"
-                  value={inputWinDelta}
-                  onChange={(e) => setInputWinDelta(e.target.value)}
-                  className="font-mono font-bold bg-background/60 border-win/30 text-win focus-visible:ring-win"
-                  placeholder="예: 25"
-                />
-              </div>
-
-              {/* Lose Delta */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-bold text-loss">경기 졌을 때 하락 RP</label>
-                  <span className="text-[10px] text-muted-foreground font-mono">(기본값: -20)</span>
-                </div>
-                <Input
-                  type="number"
-                  value={inputLoseDelta}
-                  onChange={(e) => setInputLoseDelta(e.target.value)}
-                  className="font-mono font-bold bg-background/60 border-loss/30 text-loss focus-visible:ring-loss"
-                  placeholder="예: 20"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Save Button */}
-          <div className="pt-2">
-            <Button
-              onClick={handleSaveSettings}
-              className="w-full bg-gradient-to-r from-neon-blue to-neon-green text-primary-foreground font-black tracking-wide h-12 shadow-lg active:scale-95 transition-all"
-            >
-              <Save className="size-4.5 mr-2" /> 캘리브레이션 리그 설정 저장 및 반영
-            </Button>
           </div>
         </div>
       </Card>
@@ -2121,51 +2245,107 @@ export function AdminPanel({
         <div className="mb-4">
           <div className="flex items-center gap-2 text-amber-500">
             <ShieldAlert className="size-5" />
-            <h3 className="font-black text-lg">휴면 유저 관리 (Dormant User Control)</h3>
+            <h3 className="font-black text-lg">고급 휴면 감점 설정 (Advanced Inactivity Decay Settings)</h3>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            골드 등급 이상이면서 오랫동안 대결에 참여하지 않은 학생들의 RP를 일괄 감점하여 리그 활성도를 보존합니다.
+            정기적인 활동이 없는 학생의 RP를 감점하여 리그의 활성도를 관리합니다. (매일 1회 자동 계산 및 적용)
           </p>
         </div>
 
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 bg-background/30 p-4 rounded-xl border border-border/30 mb-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-foreground">기준 미활동 일수</label>
-            <div className="relative">
-              <Input
-                type="number"
-                min={1}
-                value={inactiveDays}
-                onChange={(e) => setInactiveDays(e.target.value)}
-                className="h-10 border-border/60 bg-background/50 focus:border-amber-500 font-sans"
-              />
-              <span className="absolute right-3 top-2 text-xs text-muted-foreground font-bold">일 이상</span>
+        <div className="space-y-4">
+          {/* Toggle Switch */}
+          <div className="flex items-center justify-between p-3.5 rounded-xl border border-border/30 bg-background/25 max-w-md">
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-foreground">휴면 감점 시스템 활성화</span>
+              <span className="text-[9px] text-muted-foreground mt-0.5">활성화 시 하루 1회 조건 만족 학생의 RP 감점 자동 실행</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleDecay}
+              className={cn(
+                "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
+                localDecayEnabled ? "bg-amber-500" : "bg-muted"
+              )}
+            >
+              <div className={cn(
+                "size-5 rounded-full bg-white transition-transform shadow-sm",
+                localDecayEnabled ? "translate-x-4" : "translate-x-0"
+              )} />
+            </button>
+          </div>
+
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 bg-background/30 p-4 rounded-xl border border-border/30">
+            {/* Days Criteria */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-foreground">기준 미활동 일수</label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={1}
+                  value={localDecayDays}
+                  onChange={(e) => setLocalDecayDays(e.target.value)}
+                  onBlur={handleDaysBlur}
+                  className="h-10 border-border/60 bg-background/50 focus:border-amber-500 font-sans"
+                  disabled={!localDecayEnabled}
+                />
+                <span className="absolute right-3 top-2 text-xs text-muted-foreground font-bold">일 이상</span>
+              </div>
+            </div>
+
+            {/* RP Decay Amount */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-foreground">차감할 RP</label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={1}
+                  value={localDecayAmount}
+                  onChange={(e) => setLocalDecayAmount(e.target.value)}
+                  onBlur={handleAmountBlur}
+                  className="h-10 border-border/60 bg-background/50 focus:border-amber-500 font-sans text-destructive"
+                  disabled={!localDecayEnabled}
+                />
+                <span className="absolute right-3 top-2 text-xs text-destructive font-bold">RP 감점</span>
+              </div>
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-foreground">차감할 RP</label>
-            <div className="relative">
-              <Input
-                type="number"
-                min={1}
-                value={decayAmount}
-                onChange={(e) => setDecayAmount(e.target.value)}
-                className="h-10 border-border/60 bg-background/50 focus:border-amber-500 font-sans text-destructive"
-              />
-              <span className="absolute right-3 top-2 text-xs text-destructive font-bold">RP 감점</span>
+          {/* Tier Checkboxes */}
+          <div className="bg-background/30 p-4 rounded-xl border border-border/30">
+            <span className="text-xs font-bold text-foreground block mb-2.5">감점을 적용할 대상 티어 설정</span>
+            <div className="flex flex-wrap gap-3">
+              {(["Bronze", "Silver", "Gold", "Platinum", "Diamond"] as TierName[]).map((tier) => {
+                const checked = localDecayTiers.includes(tier);
+                let label = "";
+                let colorClass = "";
+                if (tier === "Bronze") { label = "브론즈"; colorClass = "text-tier-bronze border-tier-bronze/30"; }
+                if (tier === "Silver") { label = "실버"; colorClass = "text-tier-silver border-tier-silver/30"; }
+                if (tier === "Gold") { label = "골드"; colorClass = "text-tier-gold border-tier-gold/30"; }
+                if (tier === "Platinum") { label = "플래티넘"; colorClass = "text-tier-platinum border-tier-platinum/30"; }
+                if (tier === "Diamond") { label = "다이아몬드"; colorClass = "text-tier-diamond border-tier-diamond/30"; }
+
+                return (
+                  <label 
+                    key={tier} 
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-background/40 text-xs font-semibold cursor-pointer select-none transition-all hover:bg-background/80",
+                      checked ? `bg-amber-500/10 border-amber-500 text-amber-500` : "border-border/40 text-muted-foreground",
+                      !localDecayEnabled && "opacity-50 cursor-not-allowed"
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => localDecayEnabled && handleTierCheckboxChange(tier)}
+                      className="rounded border-border bg-background text-amber-500 focus:ring-amber-500 size-3.5"
+                      disabled={!localDecayEnabled}
+                    />
+                    <span className={colorClass}>{label}</span>
+                  </label>
+                );
+              })}
             </div>
           </div>
-        </div>
-
-        <div className="flex justify-end">
-          <Button
-            onClick={handleBulkDecay}
-            disabled={!onBulkDecay}
-            className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white font-black tracking-wide h-10 px-6 shadow-md shadow-amber-500/10 active:scale-95 transition-all"
-          >
-            <ShieldAlert className="size-4.5 mr-2" /> 휴면 유저 일괄 차감 실행
-          </Button>
         </div>
       </Card>
 
@@ -2238,7 +2418,7 @@ export function AdminPanel({
         </div>
         
         {/* 아카이브 백업 방식 새 시즌 시작 */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-destructive/10 pb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="max-w-xl">
             <h4 className="text-sm font-bold text-foreground">새 시즌 아카이브 시작 (추천)</h4>
             <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
@@ -2253,26 +2433,6 @@ export function AdminPanel({
               className="bg-destructive font-black tracking-wide hover:bg-destructive/80 active:scale-95 transition-all shadow-[0_0_15px_rgba(239,68,68,0.3)]"
             >
               <RotateCcw className="mr-2 size-4" /> 새 시즌 시작 (데이터 초기화)
-            </Button>
-          </div>
-        </div>
-
-        {/* 기존 완전 소멸 방식 리셋 */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="max-w-xl">
-            <h4 className="text-sm font-bold text-foreground">로컬 전체 기록 강제 리셋 (기록 소멸)</h4>
-            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-              이 작업은 시스템 상의 **모든 등록된 학생들의 경기 타임라인 및 결과 기록을 완벽히 소멸**시키고, 전체 학생의 RP 점수 및 전적 데이터를 **초기값(1000점, 0승 0패, 최근기록 없음)**으로 일괄 초기화합니다. 실행 시 교사 승인 비밀번호 입력이 필요합니다.
-            </p>
-          </div>
-          
-          <div className="shrink-0 self-end sm:self-center">
-            <Button
-              onClick={handleGlobalReset}
-              variant="destructive"
-              className="bg-destructive font-black tracking-wide hover:bg-destructive/80 active:scale-95 transition-all shadow-[0_0_15px_rgba(239,68,68,0.3)]"
-            >
-              <RotateCcw className="mr-2 size-4" /> 새 시즌 일괄 리셋 시작
             </Button>
           </div>
         </div>
@@ -2341,7 +2501,7 @@ export function AdminPanel({
         </div>
       )}
 
-      {/* CSV 롤백 복원 경고 팝업 */}
+      {/* JSON 롤백 복원 경고 팝업 */}
       <AlertDialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>
         <AlertDialogContent className="border-destructive/30 bg-background/95 max-w-md shadow-2xl rounded-2xl backdrop-blur-xl">
           <AlertDialogHeader>
@@ -2349,7 +2509,7 @@ export function AdminPanel({
               <ShieldAlert className="size-5 shrink-0" /> 데이터 복구 경고
             </AlertDialogTitle>
             <AlertDialogDescription className="text-sm text-muted-foreground mt-2 leading-relaxed">
-              기존 데이터가 모두 삭제되고 업로드한 파일 기준으로 복구됩니다. 진행하시겠습니까?
+              기존 데이터가 모두 삭제되고 업로드한 JSON 백업 파일 기준으로 복구됩니다. 진행하시겠습니까?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-6 gap-2">
@@ -2357,6 +2517,7 @@ export function AdminPanel({
               onClick={() => {
                 setRestoreDialogOpen(false);
                 setPendingRestoreData(null);
+                setPendingRestoreMatches(null);
               }}
               className="font-bold border-border/80 text-foreground hover:bg-accent/40 active:scale-95 transition-all rounded-xl h-11 px-5"
             >
@@ -2365,11 +2526,12 @@ export function AdminPanel({
             <AlertDialogAction 
               onClick={() => {
                 if (pendingRestoreData) {
-                  onRestoreFromCSV?.(pendingRestoreData, []);
-                  toast.success("성공적으로 데이터가 롤백되었습니다!");
+                  onRestoreFromCSV?.(pendingRestoreData, pendingRestoreMatches || []);
+                  toast.success("성공적으로 데이터가 JSON 백업에서 롤백되었습니다!");
                 }
                 setRestoreDialogOpen(false);
                 setPendingRestoreData(null);
+                setPendingRestoreMatches(null);
               }}
               className="font-black bg-destructive hover:bg-destructive/80 active:scale-95 transition-all text-white rounded-xl h-11 px-5 shadow-[0_0_15px_rgba(239,68,68,0.2)]"
             >
