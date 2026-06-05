@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, createContext, useContext } from "react";
-import type { Student, Match, Gender, TierName } from "./league-types";
+import type { Student, Match, Gender, TierName, TierSettings, DynamicBonuses } from "./league-types";
 import { studentKey, getTier, getTierSubdivision, getFullTierLabel, TIER_ORDER } from "./league-types";
 import { toast } from "sonner";
 
@@ -35,6 +35,8 @@ const TITLE_KEY = "bdm.title.v1";
 const LOCKED_KEY = "bdm.locked.v1";
 const SETTINGS_KEY = "bdm.settings.v1";
 const BONUSES_KEY = "bdm.bonuses.v1";
+const TIER_SETTINGS_KEY = "bdm.tierSettings.v1";
+const NEW_BONUSES_KEY = "bdm.bonuses_new.v1";
 
 // 세션 영속 저장을 위한 로컬스토리지 키
 const SESSION_KEY = "bdm.session.v1";
@@ -208,6 +210,28 @@ function useLeagueStoreInternal() {
     loseDelta: 20
   });
 
+  const [tierSettings, setTierSettings] = useState<TierSettings>({
+    Bronze: { winDelta: 25, loseDelta: 20 },
+    Silver: { winDelta: 25, loseDelta: 20 },
+    Gold: { winDelta: 25, loseDelta: 20 },
+    Platinum: { winDelta: 25, loseDelta: 20 }
+  });
+
+  const [dynamicBonuses, setDynamicBonuses] = useState<DynamicBonuses>({
+    freshnessEnabled: true,
+    freshnessGames: 5,
+    freshnessRp: 5,
+    streakEnabled: true,
+    streakWins: 3,
+    streakRp: 10,
+    comebackEnabled: true,
+    comebackLosses: 3,
+    comebackRp: 10,
+    marginEnabled: true,
+    marginDiff: 10,
+    marginRp: 10
+  });
+
   const [activeBonuses, setActiveBonuses] = useState<ActiveBonuses>({
     firstWin: true,
     revenge: true,
@@ -253,6 +277,14 @@ function useLeagueStoreInternal() {
             : [];
         setDecayTiers(tiers);
         saveJSON(DECAY_TIERS_KEY, tiers);
+      }
+      if (s.tierSettings !== undefined) {
+        setTierSettings(s.tierSettings);
+        saveJSON(TIER_SETTINGS_KEY, s.tierSettings);
+      }
+      if (s.bonuses !== undefined) {
+        setDynamicBonuses(s.bonuses);
+        saveJSON(NEW_BONUSES_KEY, s.bonuses);
       }
     }
     const lDecayDate = data.lastDecayDate || (data.settings && data.settings.lastDecayDate);
@@ -902,6 +934,12 @@ function useLeagueStoreInternal() {
       setDecayTiers(loadJSON<TierName[]>(DECAY_TIERS_KEY, ["Bronze", "Silver", "Gold", "Platinum"]));
       setLastDecayDate(loadJSON<string>(LAST_DECAY_DATE_KEY, ""));
 
+      const localTierSettings = loadJSON<TierSettings | null>(TIER_SETTINGS_KEY, null);
+      if (localTierSettings) setTierSettings(localTierSettings);
+
+      const localNewBonuses = loadJSON<DynamicBonuses | null>(NEW_BONUSES_KEY, null);
+      if (localNewBonuses) setDynamicBonuses(localNewBonuses);
+
       const isGuest = cachedSession?.loginId === "guest" || cachedSession?.schoolName?.includes("꿈나무");
       let activeStudents = localStudents !== null ? localStudents : SEED_STUDENTS;
       
@@ -1155,10 +1193,18 @@ function useLeagueStoreInternal() {
       let rivalBonus = 0;
       let firstWinBonus = 0;
       let revengeBonus = 0;
+      let freshnessBonus = 0;
+      let streakBonus = 0;
+      let comebackBonus = 0;
+      let marginBonus = 0;
+      let mentoringBonus = 0;
+
+      const playerTier = getTier(student.rp, tierThresholds);
+      const baseWin = tierSettings[playerTier]?.winDelta ?? rpVariables.winDelta;
+      const baseLoss = tierSettings[playerTier]?.loseDelta ?? rpVariables.loseDelta;
 
       if (won) {
         if (activeBonuses.underdog && opponents.length > 0) {
-          const playerTier = getTier(student.rp, tierThresholds);
           const playerTierRank = TIER_RANKING[playerTier] ?? 1;
           const maxOppRp = Math.max(...opponents.map((o) => o.rp));
           const maxOppTier = getTier(maxOppRp, tierThresholds);
@@ -1203,11 +1249,83 @@ function useLeagueStoreInternal() {
           });
           revengeBonus = hasPastLoss ? 10 : 0;
         }
+
+        // A. 신선도 보너스 (Freshness)
+        if (dynamicBonuses?.freshnessEnabled) {
+          const lastNMatches = matches
+            .filter((m) => m.playerAId === student.id || m.playerBId === student.id || m.playerA2Id === student.id || m.playerB2Id === student.id)
+            .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())
+            .slice(0, dynamicBonuses.freshnessGames);
+          
+          const facedOpponent = lastNMatches.some((m) => {
+            const mOppIds = (m.playerAId === student.id || m.playerA2Id === student.id)
+              ? [m.playerBId, m.playerB2Id].filter(Boolean)
+              : [m.playerAId, m.playerA2Id].filter(Boolean);
+            return mOppIds.some((oppId) => oppIds.includes(oppId));
+          });
+          if (!facedOpponent) {
+            freshnessBonus = dynamicBonuses.freshnessRp;
+          }
+        }
+
+        // B. 연승 보너스 (Winning Streak)
+        if (dynamicBonuses?.streakEnabled) {
+          const preStreak = student.currentStreak ?? 0;
+          if (preStreak + 1 >= dynamicBonuses.streakWins) {
+            streakBonus = dynamicBonuses.streakRp;
+          }
+        }
+
+        // C. 연패 컴백 보너스 (Comeback)
+        if (dynamicBonuses?.comebackEnabled) {
+          const sMatches = matches
+            .filter((m) => m.playerAId === student.id || m.playerBId === student.id || m.playerA2Id === student.id || m.playerB2Id === student.id)
+            .sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime());
+          
+          let consecutiveLosses = 0;
+          for (const m of sMatches) {
+            const mIsA = m.playerAId === student.id || m.playerA2Id === student.id;
+            const mAWon = m.scoreA > m.scoreB;
+            const mWon = mIsA ? mAWon : !mAWon;
+            if (!mWon) {
+              consecutiveLosses++;
+            } else {
+              break;
+            }
+          }
+          if (consecutiveLosses >= dynamicBonuses.comebackLosses) {
+            comebackBonus = dynamicBonuses.comebackRp;
+          }
+        }
+
+        // D. 압승 보너스 - 복식용 (Margin)
+        if (dynamicBonuses?.marginEnabled && matchType === "double") {
+          const scoreDiff = Math.abs(scoreA - scoreB);
+          if (scoreDiff >= dynamicBonuses.marginDiff) {
+            marginBonus = dynamicBonuses.marginRp;
+          }
+        }
+
+        // E. 멘토링 보너스 - 복식용 (Mentoring)
+        if (matchType === "double") {
+          const partnerId = p.role === "A" ? playerA2Id : p.role === "A2" ? playerAId : p.role === "B" ? playerB2Id : playerBId;
+          if (partnerId) {
+            const partner = students.find((s) => s.id === partnerId);
+            if (partner) {
+              const partnerTier = getTier(partner.rp, tierThresholds);
+              const myTierRank = TIER_RANKING[playerTier] ?? 1;
+              const partnerTierRank = TIER_RANKING[partnerTier] ?? 1;
+              if (myTierRank > partnerTierRank) {
+                mentoringBonus = 3; // +3 points mentoring bonus
+              }
+            }
+          }
+        }
       }
 
       const delta = won 
-        ? (rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus)
-        : -rpVariables.loseDelta;
+        ? (baseWin + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus + freshnessBonus + streakBonus + comebackBonus + marginBonus + mentoringBonus)
+        : -baseLoss;
 
       return {
         id: student.id,
@@ -1219,7 +1337,12 @@ function useLeagueStoreInternal() {
         scoreDiffBonus,
         rivalBonus,
         firstWinBonus,
-        revengeBonus
+        revengeBonus,
+        freshnessBonus,
+        streakBonus,
+        comebackBonus,
+        marginBonus,
+        mentoringBonus
       };
     }).filter(Boolean) as {
       id: string;
@@ -1232,6 +1355,11 @@ function useLeagueStoreInternal() {
       rivalBonus: number;
       firstWinBonus: number;
       revengeBonus: number;
+      freshnessBonus: number;
+      streakBonus: number;
+      comebackBonus: number;
+      marginBonus: number;
+      mentoringBonus: number;
     }[];
 
     const statA = playerStats.find((p) => p.role === "A");
@@ -1302,6 +1430,26 @@ function useLeagueStoreInternal() {
       revengeBonusB: statB?.revengeBonus,
       revengeBonusA2: statA2?.revengeBonus,
       revengeBonusB2: statB2?.revengeBonus,
+      freshnessBonusA: statA?.freshnessBonus,
+      freshnessBonusB: statB?.freshnessBonus,
+      freshnessBonusA2: statA2?.freshnessBonus,
+      freshnessBonusB2: statB2?.freshnessBonus,
+      streakBonusA: statA?.streakBonus,
+      streakBonusB: statB?.streakBonus,
+      streakBonusA2: statA2?.streakBonus,
+      streakBonusB2: statB2?.streakBonus,
+      comebackBonusA: statA?.comebackBonus,
+      comebackBonusB: statB?.comebackBonus,
+      comebackBonusA2: statA2?.comebackBonus,
+      comebackBonusB2: statB2?.comebackBonus,
+      marginBonusA: statA?.marginBonus,
+      marginBonusB: statB?.marginBonus,
+      marginBonusA2: statA2?.marginBonus,
+      marginBonusB2: statB2?.marginBonus,
+      mentoringBonusA: statA?.mentoringBonus,
+      mentoringBonusB: statB?.mentoringBonus,
+      mentoringBonusA2: statA2?.mentoringBonus,
+      mentoringBonusB2: statB2?.mentoringBonus,
     };
     
     const nextMatches = [match, ...matches];
@@ -1341,6 +1489,11 @@ function useLeagueStoreInternal() {
         }
       }
 
+      const preStreak = s.currentStreak ?? 0;
+      const nextStreak = won 
+        ? (preStreak >= 0 ? preStreak + 1 : 1)
+        : (preStreak <= 0 ? preStreak - 1 : -1);
+
       return {
         ...s,
         rp: nextRp,
@@ -1350,6 +1503,7 @@ function useLeagueStoreInternal() {
         demotionShields: nextShields,
         lastMatchDate: new Date().toISOString(),
         lastWinDate: won ? todayYmd : s.lastWinDate,
+        currentStreak: nextStreak,
       };
     });
 
@@ -2022,7 +2176,13 @@ function useLeagueStoreInternal() {
   }, [matches, students, tierThresholds, rpVariables]);
 
   // 리그 커스텀 설정 통합 저장 (마스터 DB 동기화 포함)
-  const saveLeagueSettings = useCallback(async (newTitle: string, newBonuses: ActiveBonuses, newOpMode?: "school" | "club") => {
+  const saveLeagueSettings = useCallback(async (
+    newTitle: string, 
+    newBonuses: ActiveBonuses, 
+    newOpMode?: "school" | "club",
+    newTierSettings?: TierSettings,
+    newDynamicBonuses?: DynamicBonuses
+  ) => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 설정은 수정할 수 없습니다 (읽기 전용).");
       return;
@@ -2034,6 +2194,20 @@ function useLeagueStoreInternal() {
     saveJSON(TITLE_KEY, newTitle);
     saveJSON(BONUSES_KEY, newBonuses);
     localStorage.setItem(OP_MODE_KEY, targetOpMode);
+
+    let finalTierSettings = tierSettings;
+    if (newTierSettings) {
+      finalTierSettings = newTierSettings;
+      setTierSettings(newTierSettings);
+      saveJSON(TIER_SETTINGS_KEY, newTierSettings);
+    }
+
+    let finalDynamicBonuses = dynamicBonuses;
+    if (newDynamicBonuses) {
+      finalDynamicBonuses = newDynamicBonuses;
+      setDynamicBonuses(newDynamicBonuses);
+      saveJSON(NEW_BONUSES_KEY, newDynamicBonuses);
+    }
 
     if (session) {
       const settingsPayload = {
@@ -2094,7 +2268,9 @@ function useLeagueStoreInternal() {
                 decayEnabled,
                 decayDays,
                 decayAmount,
-                decayTiers
+                decayTiers,
+                tierSettings: finalTierSettings,
+                bonuses: finalDynamicBonuses
               }
             })
           });
@@ -2105,7 +2281,7 @@ function useLeagueStoreInternal() {
       }
       setIsSyncing(false);
     }
-  }, [session, opMode, decayEnabled, decayDays, decayAmount, decayTiers]);
+  }, [session, opMode, decayEnabled, decayDays, decayAmount, decayTiers, tierSettings, dynamicBonuses]);
 
   // Decay settings save function
   const saveDecaySettings = useCallback(async (enabled: boolean, days: number, amount: number, tiers: TierName[]) => {
@@ -2700,7 +2876,11 @@ function useLeagueStoreInternal() {
     lastDecayDate,
     setLastDecayDate,
     saveDecaySettings,
-    checkAndApplyAutomaticDecay
+    checkAndApplyAutomaticDecay,
+    tierSettings,
+    setTierSettings,
+    dynamicBonuses,
+    setDynamicBonuses
   };
 }
 

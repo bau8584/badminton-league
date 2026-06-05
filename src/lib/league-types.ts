@@ -54,6 +54,26 @@ export type Match = {
   revengeBonusB?: number;
   revengeBonusA2?: number;
   revengeBonusB2?: number;
+  freshnessBonusA?: number;
+  freshnessBonusB?: number;
+  freshnessBonusA2?: number;
+  freshnessBonusB2?: number;
+  streakBonusA?: number;
+  streakBonusB?: number;
+  streakBonusA2?: number;
+  streakBonusB2?: number;
+  comebackBonusA?: number;
+  comebackBonusB?: number;
+  comebackBonusA2?: number;
+  comebackBonusB2?: number;
+  marginBonusA?: number;
+  marginBonusB?: number;
+  marginBonusA2?: number;
+  marginBonusB2?: number;
+  mentoringBonusA?: number;
+  mentoringBonusB?: number;
+  mentoringBonusA2?: number;
+  mentoringBonusB2?: number;
 };
 
 export type TierName = "Bronze" | "Silver" | "Gold" | "Platinum" | "Diamond";
@@ -128,3 +148,23 @@ export const TIER_STYLES: Record<TierName, { bg: string; text: string; ring: str
 export function studentKey(s: { grade: number; classNum: number; number: number; name: string }) {
   return `${s.grade}-${s.classNum}-${s.number}-${s.name}`;
 }
+
+export type TierSettings = Record<"Bronze" | "Silver" | "Gold" | "Platinum", {
+  winDelta: number;
+  loseDelta: number;
+}>;
+
+export type DynamicBonuses = {
+  freshnessEnabled: boolean;
+  freshnessGames: number;
+  freshnessRp: number;
+  streakEnabled: boolean;
+  streakWins: number;
+  streakRp: number;
+  comebackEnabled: boolean;
+  comebackLosses: number;
+  comebackRp: number;
+  marginEnabled: boolean;
+  marginDiff: number;
+  marginRp: number;
+};

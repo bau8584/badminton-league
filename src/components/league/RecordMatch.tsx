@@ -8,6 +8,7 @@ import { Trophy, X, Lock, Sparkles, User, Users } from "lucide-react";
 import type { Student, Match } from "@/lib/league-types";
 import { getTier, getTierSubdivision, TIER_ORDER } from "@/lib/league-types";
 import { toast } from "sonner";
+import { useLeagueStore } from "@/lib/league-store";
 
 const GRADES = [1, 2, 3, 4, 5, 6];
 const CLASSES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -34,6 +35,12 @@ type PlayerResult = {
   rivalBonus: number;
   firstWinBonus: number;
   revengeBonus: number;
+  freshnessBonus: number;
+  streakBonus: number;
+  comebackBonus: number;
+  marginBonus: number;
+  mentoringBonus: number;
+  baseWin: number;
 };
 
 type MatchResultData = {
@@ -86,6 +93,208 @@ export function RecordMatch({
   // 성별 정보 누락 자동 완성을 위한 상태
   const [genderModalOpen, setGenderModalOpen] = useState(false);
   const [genderTargetId, setGenderTargetId] = useState<string | null>(null);
+
+  // eSports UI Animation & SFX States
+  const [animationStep, setAnimationStep] = useState(-1);
+  const [countUpProgress, setCountUpProgress] = useState(0);
+  const [countUpDone, setCountUpDone] = useState(false);
+
+  // SFX Player Placeholder Hook
+  const playSoundEffect = (type: "victory" | "defeat" | "stamp" | "countup" | "total") => {
+    console.log(`[SFX Play] ${type}`);
+    // Future expansion: hook up to local sound files (e.g. victory.mp3, stamp.mp3)
+    // const audio = new Audio(`/sounds/${type}.mp3`);
+    // audio.play().catch(() => {});
+  };
+
+  // Helper to extract active bonuses for the receipt view
+  const getRewardItems = (p: PlayerResult) => {
+    const items = [];
+    
+    // Base Victory RP
+    if (p.baseWin > 0) {
+      items.push({
+        id: "baseWin",
+        icon: "⚔️",
+        label: "기본 승리",
+        value: p.baseWin,
+        desc: `${p.finalTier} 티어 매치 승리`
+      });
+    }
+    
+    // Day's First Win Bonus
+    if (p.firstWinBonus > 0) {
+      items.push({
+        id: "firstWinBonus",
+        icon: "🌟",
+        label: "오늘의 첫 승",
+        value: p.firstWinBonus,
+        desc: "오늘 첫 매치 승리 달성!"
+      });
+    }
+
+    // Revenge match win
+    if (p.revengeBonus > 0) {
+      items.push({
+        id: "revengeBonus",
+        icon: "😈",
+        label: "복수전 성공",
+        value: p.revengeBonus,
+        desc: "이전 패배 설욕 성공!"
+      });
+    }
+
+    // Underdog Match Win
+    if (p.underdogBonus > 0) {
+      items.push({
+        id: "underdogBonus",
+        icon: "🛡️",
+        label: "언더독 격파",
+        value: p.underdogBonus,
+        desc: "더 높은 티어의 상대 매칭 극복!"
+      });
+    }
+
+    // High Score Gap / Margin Win
+    if (p.scoreDiffBonus > 0) {
+      items.push({
+        id: "scoreDiffBonus",
+        icon: "📈",
+        label: "득점차 보너스",
+        value: p.scoreDiffBonus,
+        desc: "격차에 따른 가산점!"
+      });
+    }
+
+    // Rival Win
+    if (p.rivalBonus > 0) {
+      items.push({
+        id: "rivalBonus",
+        icon: "⚔️",
+        label: "라이벌 격파",
+        value: p.rivalBonus,
+        desc: "동등한 라이벌 매치 승리!"
+      });
+    }
+
+    // Freshness / Diversity Match Win (미매칭)
+    if (p.freshnessBonus > 0) {
+      items.push({
+        id: "freshnessBonus",
+        icon: "✨",
+        label: "다양성 보너스",
+        value: p.freshnessBonus,
+        desc: "최근 10경기 내 미매칭 상대 격파!"
+      });
+    }
+
+    // Win Streak Bonus
+    if (p.streakBonus > 0) {
+      items.push({
+        id: "streakBonus",
+        icon: "🔥",
+        label: "연승 보너스",
+        value: p.streakBonus,
+        desc: "연승 흐름을 유지하며 승리!"
+      });
+    }
+
+    // Comeback Bonus (연패 컴백)
+    if (p.comebackBonus > 0) {
+      items.push({
+        id: "comebackBonus",
+        icon: "🔥",
+        label: "연패 컴백",
+        value: p.comebackBonus,
+        desc: "연패 사슬 절단 성공!"
+      });
+    }
+
+    // Margin Win (압승 보너스)
+    if (p.marginBonus > 0) {
+      items.push({
+        id: "marginBonus",
+        icon: "🚀",
+        label: "압승 보너스",
+        value: p.marginBonus,
+        desc: "점수 차 10점 이상 대승!"
+      });
+    }
+
+    // Mentoring Match Win
+    if (p.mentoringBonus > 0) {
+      items.push({
+        id: "mentoringBonus",
+        icon: "🤝",
+        label: "멘토링 보너스",
+        value: p.mentoringBonus,
+        desc: "하위 티어 파트너와 완벽한 협동!"
+      });
+    }
+
+    return items;
+  };
+
+  // Staggered reveal & count-up trigger timeline
+  useEffect(() => {
+    if (showModal && resultData) {
+      // 1. Reset states
+      setAnimationStep(-1);
+      setCountUpProgress(0);
+      setCountUpDone(false);
+
+      // Play victory sound
+      playSoundEffect("victory");
+
+      const w1Items = getRewardItems(resultData.winner);
+      const w2Items = resultData.winner2 ? getRewardItems(resultData.winner2) : [];
+      const totalSteps = Math.max(w1Items.length, w2Items.length);
+
+      const startCountUp = () => {
+        playSoundEffect("countup");
+        let progress = 0;
+        const duration = 600; // ms
+        const intervalTime = 30; // ms
+        const step = intervalTime / duration;
+
+        const timer = setInterval(() => {
+          progress = Math.min(1, progress + step);
+          setCountUpProgress(progress);
+
+          if (progress >= 1) {
+            clearInterval(timer);
+            setCountUpDone(true);
+            playSoundEffect("total");
+          }
+        }, intervalTime);
+      };
+
+      if (totalSteps === 0) {
+        setAnimationStep(0);
+        startCountUp();
+        return;
+      }
+
+      let currentStep = -1;
+      const interval = setInterval(() => {
+        currentStep += 1;
+        setAnimationStep(currentStep);
+        playSoundEffect("stamp");
+
+        if (currentStep >= totalSteps - 1) {
+          clearInterval(interval);
+          const delayTimeout = setTimeout(() => {
+            startCountUp();
+          }, 350);
+          return () => clearTimeout(delayTimeout);
+        }
+      }, 300);
+
+      return () => {
+        clearInterval(interval);
+      };
+    }
+  }, [showModal, resultData]);
 
   // Auto-populate recommended match selections when redirected
   useEffect(() => {
@@ -206,6 +415,11 @@ export function RecordMatch({
       let rivalBonus = 0;
       let firstWinBonus = 0;
       let revengeBonus = 0;
+      let freshnessBonus = 0;
+      let streakBonus = 0;
+      let comebackBonus = 0;
+      let marginBonus = 0;
+      let mentoringBonus = 0;
 
       if (role === "A") {
         rpDelta = matchObj.rpDeltaA ?? 0;
@@ -214,6 +428,11 @@ export function RecordMatch({
         rivalBonus = matchObj.rivalBonusA ?? 0;
         firstWinBonus = matchObj.firstWinBonusA ?? 0;
         revengeBonus = matchObj.revengeBonusA ?? 0;
+        freshnessBonus = matchObj.freshnessBonusA ?? 0;
+        streakBonus = matchObj.streakBonusA ?? 0;
+        comebackBonus = matchObj.comebackBonusA ?? 0;
+        marginBonus = matchObj.marginBonusA ?? 0;
+        mentoringBonus = matchObj.mentoringBonusA ?? 0;
       } else if (role === "A2") {
         rpDelta = matchObj.rpDeltaA2 ?? 0;
         underdogBonus = matchObj.underdogBonusA2 ?? 0;
@@ -221,6 +440,11 @@ export function RecordMatch({
         rivalBonus = matchObj.rivalBonusA2 ?? 0;
         firstWinBonus = matchObj.firstWinBonusA2 ?? 0;
         revengeBonus = matchObj.revengeBonusA2 ?? 0;
+        freshnessBonus = matchObj.freshnessBonusA2 ?? 0;
+        streakBonus = matchObj.streakBonusA2 ?? 0;
+        comebackBonus = matchObj.comebackBonusA2 ?? 0;
+        marginBonus = matchObj.marginBonusA2 ?? 0;
+        mentoringBonus = matchObj.mentoringBonusA2 ?? 0;
       } else if (role === "B") {
         rpDelta = matchObj.rpDeltaB ?? 0;
         underdogBonus = matchObj.underdogBonusB ?? 0;
@@ -228,6 +452,11 @@ export function RecordMatch({
         rivalBonus = matchObj.rivalBonusB ?? 0;
         firstWinBonus = matchObj.firstWinBonusB ?? 0;
         revengeBonus = matchObj.revengeBonusB ?? 0;
+        freshnessBonus = matchObj.freshnessBonusB ?? 0;
+        streakBonus = matchObj.streakBonusB ?? 0;
+        comebackBonus = matchObj.comebackBonusB ?? 0;
+        marginBonus = matchObj.marginBonusB ?? 0;
+        mentoringBonus = matchObj.mentoringBonusB ?? 0;
       } else if (role === "B2") {
         rpDelta = matchObj.rpDeltaB2 ?? 0;
         underdogBonus = matchObj.underdogBonusB2 ?? 0;
@@ -235,6 +464,11 @@ export function RecordMatch({
         rivalBonus = matchObj.rivalBonusB2 ?? 0;
         firstWinBonus = matchObj.firstWinBonusB2 ?? 0;
         revengeBonus = matchObj.revengeBonusB2 ?? 0;
+        freshnessBonus = matchObj.freshnessBonusB2 ?? 0;
+        streakBonus = matchObj.streakBonusB2 ?? 0;
+        comebackBonus = matchObj.comebackBonusB2 ?? 0;
+        marginBonus = matchObj.marginBonusB2 ?? 0;
+        mentoringBonus = matchObj.mentoringBonusB2 ?? 0;
       }
 
       const finalRp = Math.max(0, prevRp + rpDelta);
@@ -246,6 +480,8 @@ export function RecordMatch({
       const basePromoted = TIER_ORDER.indexOf(finalTier) < TIER_ORDER.indexOf(prevTier);
       const subPromoted = finalTier === prevTier && finalSub < prevSub;
       const promoted = won && (basePromoted || subPromoted);
+
+      const baseWin = won ? (rpDelta - (underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus + freshnessBonus + streakBonus + comebackBonus + marginBonus + mentoringBonus)) : 0;
 
       return {
         name: student.name,
@@ -264,7 +500,13 @@ export function RecordMatch({
         scoreDiffBonus,
         rivalBonus,
         firstWinBonus,
-        revengeBonus
+        revengeBonus,
+        freshnessBonus,
+        streakBonus,
+        comebackBonus,
+        marginBonus,
+        mentoringBonus,
+        baseWin
       };
     };
 
@@ -315,39 +557,176 @@ export function RecordMatch({
     toast.warning("성별을 입력하지 않아 선수 선택이 취소되었습니다.");
   };
 
-  const hasBonuses = (p: PlayerResult) => {
-    return p.underdogBonus > 0 || p.scoreDiffBonus > 0 || p.rivalBonus > 0 || p.firstWinBonus > 0 || p.revengeBonus > 0;
+  // Player Receipt Component (defined inside RecordMatch to access animationStep, countUpProgress, etc. easily)
+  const renderPlayerReceipt = (p: PlayerResult, rewards: ReturnType<typeof getRewardItems>) => {
+    return (
+      <div className="relative overflow-hidden rounded-xl border border-cyan-500/20 bg-[#090d16]/95 p-5 shadow-[0_0_30px_rgba(0,180,216,0.1)] flex flex-col justify-between h-full animate-glow-pulse">
+        {/* Futuristic Grid Overlay inside card */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(18,24,38,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(18,24,38,0.12)_1px,transparent_1px)] bg-[size:12px_12px] pointer-events-none opacity-40" />
+        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-cyan-500/10 to-transparent transform rotate-45 translate-x-12 -translate-y-12 pointer-events-none" />
+
+        {/* Player Header */}
+        <div className="relative z-10 mb-4 pb-3 border-b border-[#1b253b] flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <GenderMark gender={p.gender} className="size-4 text-[10px]" />
+              <span className="text-base font-extrabold tracking-tight text-white">{p.name}</span>
+              {p.promoted && (
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white font-extrabold text-[9px] px-2 py-0.5 shadow-[0_0_10px_rgba(245,158,11,0.4)] animate-bounce shrink-0">
+                  ▲ 승급! 🎉
+                </span>
+              )}
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              {p.grade}학년 {p.classNum}반 · {p.number}번
+            </div>
+          </div>
+          <div className="flex flex-col items-end shrink-0">
+            <span className="text-[9px] font-black text-cyan-400 bg-cyan-950/50 border border-cyan-500/30 px-2.5 py-0.5 rounded tracking-wider">
+              WINNER
+            </span>
+          </div>
+        </div>
+
+        {/* Rewards List (Receipt Items) */}
+        <div className="relative z-10 space-y-2.5 my-2 flex-grow">
+          {rewards.length === 0 ? (
+            <div className="text-center py-6 text-xs text-muted-foreground">획득한 보너스 내역이 없습니다.</div>
+          ) : (
+            rewards.map((item, idx) => {
+              const isVisible = animationStep >= idx;
+              return (
+                <div
+                  key={item.id}
+                  className={cn(
+                    "flex items-center justify-between p-2.5 rounded-lg border bg-[#0d1222]/80 border-[#1c273e] transition-all duration-200",
+                    isVisible 
+                      ? "opacity-100 scale-100 animate-stamp-pop border-cyan-500/20 shadow-[0_0_10px_rgba(0,180,216,0.05)]" 
+                      : "opacity-0 scale-150 pointer-events-none"
+                  )}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center justify-center size-7 rounded bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 shrink-0">
+                      <span className="text-sm">{item.icon}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white truncate">{item.label}</div>
+                      <div className="text-[9px] text-muted-foreground truncate">{item.desc}</div>
+                    </div>
+                  </div>
+                  <div className="text-xs font-extrabold text-cyan-400 font-mono shrink-0">
+                    +{item.value} RP
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Total RP Count-up Section */}
+        <div className="relative z-10 mt-4 pt-3 border-t border-[#1b253b]">
+          <div className="flex items-center justify-between px-3 py-3 rounded-lg bg-gradient-to-r from-cyan-950/30 via-[#101729] to-cyan-950/30 border border-cyan-500/20 shadow-[0_0_15px_rgba(0,180,216,0.05)]">
+            <div className="flex flex-col">
+              <span className="text-[9px] text-muted-foreground uppercase font-black tracking-wider">최종 획득 RP</span>
+              <div className="flex items-center gap-1 mt-0.5">
+                <span className="text-[10px] text-muted-foreground font-mono">기존 {p.prevRp}</span>
+                <span className="text-[9px] text-muted-foreground">➔</span>
+                <span className="text-[10px] font-bold text-cyan-400 font-mono">
+                  최종 {Math.min(10000, p.prevRp + Math.max(0, Math.floor(p.rpDelta * countUpProgress)))}
+                </span>
+              </div>
+            </div>
+            <div className={cn(
+              "text-xl font-black font-mono text-cyan-400 tracking-tight text-glow-blue",
+              countUpDone && "scale-105 transition-all duration-300"
+            )}>
+              +{Math.max(0, Math.floor(p.rpDelta * countUpProgress))} RP
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
-  const renderBonuses = (p: PlayerResult) => {
+  const renderMatchSummary = () => {
+    if (!resultData) return null;
     return (
-      <>
-        {p.firstWinBonus > 0 && (
-          <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-500 font-extrabold text-[10px] px-2.5 py-1 shadow-[0_0_8px_rgba(245,158,11,0.1)]">
-            🌟 오늘의 첫 승 (+15 RP)
-          </span>
-        )}
-        {p.revengeBonus > 0 && (
-          <span className="inline-flex items-center gap-1 rounded bg-purple-500/10 border border-purple-500/30 text-purple-400 font-extrabold text-[10px] px-2.5 py-1 shadow-[0_0_8px_rgba(168,85,247,0.1)]">
-            😈 복수전 성공! (+10 RP)
-          </span>
-        )}
-        {p.underdogBonus > 0 && (
-          <span className="inline-flex items-center gap-1 rounded bg-blue-500/10 border border-blue-500/30 text-blue-400 font-extrabold text-[10px] px-2.5 py-1 shadow-[0_0_8px_rgba(59,130,246,0.15)]">
-            🛡️ 언더독 격파 (+{p.underdogBonus} RP)
-          </span>
-        )}
-        {p.scoreDiffBonus > 0 && (
-          <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-extrabold text-[10px] px-2.5 py-1 shadow-[0_0_8px_rgba(16,185,129,0.15)]">
-            🔥 압승 보너스 (+{p.scoreDiffBonus} RP)
-          </span>
-        )}
-        {p.rivalBonus > 0 && (
-          <span className="inline-flex items-center gap-1 rounded bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-extrabold text-[10px] px-2.5 py-1 shadow-[0_0_8px_rgba(6,182,212,0.15)]">
-            ⚔️ 라이벌 격파! (+5 RP)
-          </span>
-        )}
-      </>
+      <div className="relative overflow-hidden rounded-xl border border-[#1b253b] bg-[#070a12]/95 p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)] flex flex-col justify-between h-full">
+        {/* Grid Background Effect */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(18,24,38,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(18,24,38,0.12)_1px,transparent_1px)] bg-[size:12px_12px] pointer-events-none opacity-40" />
+
+        <div className="relative z-10 text-center text-xs font-black uppercase tracking-[0.2em] text-[#5b6f95] mb-4 pb-2 border-b border-[#1b253b]">
+          MATCH SUMMARY
+        </div>
+
+        {/* Score Visualizer */}
+        <div className="relative z-10 flex items-center justify-center gap-6 py-4 mb-4 rounded-lg bg-[#0e1322] border border-[#172036] max-w-xs mx-auto w-full">
+          <div className="text-right flex flex-col items-center min-w-[70px]">
+            <span className="text-[10px] text-[#8fa0c4] font-black truncate max-w-[80px]">{resultData.winner.name}</span>
+            <span className="text-2xl font-black text-cyan-400 font-mono mt-0.5">{resultData.winner.score}</span>
+          </div>
+          <div className="text-sm font-black text-[#4f6285] font-mono px-2 py-0.5 rounded bg-[#090c15] border border-[#1b253b] skew-x-[-12deg]">VS</div>
+          <div className="text-left flex flex-col items-center min-w-[70px]">
+            <span className="text-[10px] text-[#8fa0c4] font-black truncate max-w-[80px]">{resultData.loser.name}</span>
+            <span className="text-2xl font-black text-rose-500 font-mono mt-0.5">{resultData.loser.score}</span>
+          </div>
+        </div>
+
+        {/* Player outcomes list */}
+        <div className="relative z-10 space-y-2.5">
+          {/* Winner 1 */}
+          <div className="flex items-center justify-between p-2.5 rounded-lg bg-cyan-950/20 border border-cyan-500/20 transition-all">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[9px] font-black text-cyan-400 bg-cyan-950 border border-cyan-500/30 px-1.5 py-0.5 rounded shrink-0">WIN</span>
+              <span className="text-xs font-bold text-white truncate">{resultData.winner.name}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <TierBadge rp={resultData.winner.finalRp} />
+              <span className="text-xs font-extrabold text-cyan-400 font-mono">+{resultData.winner.rpDelta} RP</span>
+            </div>
+          </div>
+
+          {/* Winner 2 (if doubles) */}
+          {resultData.winner2 && (
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-cyan-950/20 border border-cyan-500/20 transition-all">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[9px] font-black text-cyan-400 bg-cyan-950 border border-cyan-500/30 px-1.5 py-0.5 rounded shrink-0">WIN</span>
+                <span className="text-xs font-bold text-white truncate">{resultData.winner2.name}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <TierBadge rp={resultData.winner2.finalRp} />
+                <span className="text-xs font-extrabold text-cyan-400 font-mono">+{resultData.winner2.rpDelta} RP</span>
+              </div>
+            </div>
+          )}
+
+          {/* Loser 1 */}
+          <div className="flex items-center justify-between p-2.5 rounded-lg bg-rose-950/10 border border-rose-500/20 transition-all">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[9px] font-black text-rose-400 bg-rose-950 border border-rose-500/30 px-1.5 py-0.5 rounded shrink-0">LOSE</span>
+              <span className="text-xs font-bold text-white truncate">{resultData.loser.name}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <TierBadge rp={resultData.loser.finalRp} />
+              <span className="text-xs font-extrabold text-rose-500 font-mono">{resultData.loser.rpDelta} RP</span>
+            </div>
+          </div>
+
+          {/* Loser 2 (if doubles) */}
+          {resultData.loser2 && (
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-rose-950/10 border border-rose-500/20 transition-all">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[9px] font-black text-rose-400 bg-rose-950 border border-rose-500/30 px-1.5 py-0.5 rounded shrink-0">LOSE</span>
+                <span className="text-xs font-bold text-white truncate">{resultData.loser2.name}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <TierBadge rp={resultData.loser2.finalRp} />
+                <span className="text-xs font-extrabold text-rose-500 font-mono">{resultData.loser2.rpDelta} RP</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     );
   };
 
@@ -435,263 +814,113 @@ export function RecordMatch({
       </Button>
 
       {/* Match Result Modal Popup */}
-      {showModal && resultData && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-300">
-          <div className="relative w-full max-w-3xl overflow-hidden border border-neon-blue/30 bg-background/95 rounded-2xl p-6 md:p-8 shadow-[0_0_50px_rgba(0,180,216,0.15)] flex flex-col items-center animate-in zoom-in duration-300">
-            {/* Background effects */}
-            <div className="absolute inset-0 bg-[linear-gradient(rgba(18,18,18,0.2)_1px,transparent_1px),linear-gradient(90deg,rgba(18,18,18,0.2)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none opacity-20" />
-            <div className="absolute -top-40 -left-40 size-80 rounded-full bg-neon-blue/10 blur-[100px] pointer-events-none" />
-            <div className="absolute -bottom-40 -right-40 size-80 rounded-full bg-neon-green/10 blur-[100px] pointer-events-none" />
+      {showModal && resultData && (() => {
+        const w1Rewards = getRewardItems(resultData.winner);
+        const w2Rewards = resultData.winner2 ? getRewardItems(resultData.winner2) : [];
+        const isDoubles = !!resultData.winner2;
 
-            {/* Trophy & Title */}
-            <div className="relative z-10 flex flex-col items-center text-center">
-              <div className="flex size-14 items-center justify-center rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-500 shadow-[0_0_30px_rgba(245,158,11,0.2)] mb-4 animate-bounce shrink-0">
-                <Trophy className="size-7" />
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-300">
+            <div className="relative w-full max-w-5xl overflow-hidden border border-cyan-500/30 bg-[#06080f] rounded-2xl p-6 md:p-8 shadow-[0_0_60px_rgba(0,180,216,0.2)] flex flex-col items-center animate-in zoom-in duration-300">
+              {/* Embedded custom CSS */}
+              <style dangerouslySetInnerHTML={{ __html: `
+                @keyframes stamp-pop {
+                  0% {
+                    transform: scale(2.2);
+                    filter: brightness(2.5) blur(3px);
+                    opacity: 0;
+                  }
+                  60% {
+                    transform: scale(0.96);
+                    filter: brightness(1.2);
+                  }
+                  100% {
+                    transform: scale(1);
+                    filter: brightness(1);
+                    opacity: 1;
+                  }
+                }
+                .animate-stamp-pop {
+                  animation: stamp-pop 0.24s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+                }
+                @keyframes glow-pulse {
+                  0%, 100% {
+                    box-shadow: 0 0 15px rgba(0, 180, 216, 0.15), inset 0 0 15px rgba(0, 180, 216, 0.05);
+                    border-color: rgba(0, 180, 216, 0.2);
+                  }
+                  50% {
+                    box-shadow: 0 0 30px rgba(0, 180, 216, 0.4), inset 0 0 25px rgba(0, 180, 216, 0.15);
+                    border-color: rgba(0, 180, 216, 0.5);
+                  }
+                }
+                .animate-glow-pulse {
+                  animation: glow-pulse 3s infinite ease-in-out;
+                }
+                @keyframes text-glow-victory {
+                  0%, 100% {
+                    text-shadow: 0 0 15px rgba(0, 180, 216, 0.5), 0 0 30px rgba(0, 180, 216, 0.2);
+                  }
+                  50% {
+                    text-shadow: 0 0 25px rgba(0, 180, 216, 0.8), 0 0 45px rgba(0, 180, 216, 0.4);
+                  }
+                }
+                .animate-glow-victory {
+                  animation: text-glow-victory 2.5s infinite ease-in-out;
+                }
+              ` }} />
+
+              {/* Background tech grids / sparkles */}
+              <div className="absolute inset-0 bg-[linear-gradient(rgba(18,24,38,0.15)_1px,transparent_1px),linear-gradient(90deg,rgba(18,24,38,0.15)_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none opacity-30" />
+              <div className="absolute -top-40 -left-40 size-96 rounded-full bg-cyan-500/10 blur-[120px] pointer-events-none" />
+              <div className="absolute -bottom-40 -right-40 size-96 rounded-full bg-cyan-500/10 blur-[120px] pointer-events-none" />
+
+              {/* Header Title Banner */}
+              <div className="relative z-10 flex flex-col items-center text-center mb-6 shrink-0">
+                <div className="flex size-14 items-center justify-center rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 shadow-[0_0_30px_rgba(0,180,216,0.3)] mb-3 shrink-0 animate-bounce">
+                  <Trophy className="size-7 text-cyan-400" />
+                </div>
+                <h2 className="text-2xl md:text-3xl font-black uppercase tracking-[0.25em] text-white animate-glow-victory mb-1">
+                  MATCH RECORDED
+                </h2>
+                <p className="text-[11px] text-[#5b6f95] max-w-md leading-relaxed uppercase tracking-wider">
+                  포인트 변동 내역 및 다이내믹 보너스 획득 결과
+                </p>
               </div>
-              <h2 className="text-2xl md:text-3xl font-black uppercase tracking-wider text-glow-gold text-gold mb-1">
-                경기 결과 등록 완료!
-              </h2>
-              <p className="text-xs text-muted-foreground max-w-md mb-6 leading-relaxed">
-                방금 완료된 경기의 스코어보드 결과가 정상 반영되었습니다.<br />
-                아래에서 변동된 RP 및 최종 랭킹 티어를 확인해 보세요.
-              </p>
-            </div>
 
-            {/* Main Details Panel */}
-            <div className="relative z-10 w-full space-y-4 my-2">
-              
-              {/* Winner Stripe */}
-              <div className="relative overflow-hidden rounded-xl border border-win/30 bg-win/5 p-4 shadow-[0_0_15px_rgba(34,197,94,0.05)]">
-                <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-win" />
-                
-                <div className="flex flex-col gap-4 pl-2">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    {/* Winner 1 profile */}
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="flex items-center justify-center px-2.5 py-1 rounded bg-win/15 text-win text-xs font-black tracking-widest border border-win/30 uppercase">
-                        WINNER
-                      </span>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <GenderMark gender={resultData.winner.gender} className="size-4 text-[10px]" />
-                          <span className="text-lg font-black">{resultData.winner.name}</span>
-                          {resultData.winner.promoted && (
-                            <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white font-extrabold text-[9px] px-2 py-0.5 shadow-[0_0_10px_rgba(245,158,11,0.4)] animate-pulse">
-                              ▲ 승급! 🎉
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-muted-foreground mt-0.5">
-                          {resultData.winner.grade}학년 {resultData.winner.classNum}반 · {resultData.winner.number}번
-                        </div>
-                      </div>
-                    </div>
+              {/* Multi-column Layout */}
+              <div className="relative z-10 w-full grid gap-6 md:grid-cols-[2fr_1fr] items-stretch flex-grow overflow-y-auto max-h-[60vh] md:max-h-[none] px-1">
+                {/* Left Column: Player Receipt Cards */}
+                <div className={cn(
+                  "grid gap-4 items-stretch",
+                  isDoubles ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 max-w-md mx-auto w-full"
+                )}>
+                  {renderPlayerReceipt(resultData.winner, w1Rewards)}
+                  {isDoubles && resultData.winner2 && renderPlayerReceipt(resultData.winner2, w2Rewards)}
+                </div>
 
-                    {/* Score box */}
-                    <div className="flex items-center justify-center md:justify-end gap-1 shrink-0 font-mono font-black text-2xl px-4 py-1.5 rounded-lg bg-background/50 border border-border/30">
-                      <span className="text-win">{resultData.winner.score}</span>
-                      <span className="text-muted-foreground text-sm font-normal mx-1">:</span>
-                      <span className="text-loss">{resultData.loser.score}</span>
-                    </div>
-
-                    {/* RP Flow Visualizer for Winner 1 */}
-                    <div className="flex items-center justify-between md:justify-end gap-4 md:gap-6 bg-background/30 rounded-xl p-3 border border-border/20 md:min-w-[320px]">
-                      <div className="flex flex-col items-center">
-                        <span className="text-[10px] text-muted-foreground font-medium mb-1">이전</span>
-                        <TierBadge rp={resultData.winner.prevRp} />
-                        <span className="font-mono text-[11px] font-semibold text-muted-foreground mt-0.5">{resultData.winner.prevRp} RP</span>
-                      </div>
-                      
-                      <div className="flex flex-col items-center justify-center shrink-0">
-                        <span className="text-muted-foreground text-sm font-semibold">➔</span>
-                        <span className="text-[9px] font-black text-win bg-win/15 px-1.5 py-0.5 rounded border border-win/30 font-mono mt-1">+{resultData.winner.rpDelta} RP</span>
-                      </div>
-
-                      <div className="flex flex-col items-center">
-                        <span className="text-[10px] text-neon-blue font-bold mb-1">최종</span>
-                        <TierBadge rp={resultData.winner.finalRp} />
-                        <span className="font-mono text-xs font-black text-neon-blue mt-0.5">{resultData.winner.finalRp} RP</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 🌟 Winner 1 Bonuses */}
-                  {hasBonuses(resultData.winner) && (
-                    <div className="pt-2 border-t border-win/10 flex flex-wrap items-center gap-2">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-win/80 mr-1">{resultData.winner.name} 보상:</span>
-                      {renderBonuses(resultData.winner)}
-                    </div>
-                  )}
-
-                  {/* Winner 2 Profile & RP (if present) */}
-                  {resultData.winner2 && (
-                    <div className="border-t border-win/10 pt-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="flex items-center justify-center px-2.5 py-1 rounded bg-win/15 text-win text-xs font-black tracking-widest border border-win/30 uppercase">
-                          PARTNER
-                        </span>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <GenderMark gender={resultData.winner2.gender} className="size-4 text-[10px]" />
-                            <span className="text-lg font-black">{resultData.winner2.name}</span>
-                            {resultData.winner2.promoted && (
-                              <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white font-extrabold text-[9px] px-2 py-0.5 shadow-[0_0_10px_rgba(245,158,11,0.4)] animate-pulse">
-                                ▲ 승급! 🎉
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground mt-0.5">
-                            {resultData.winner2.grade}학년 {resultData.winner2.classNum}반 · {resultData.winner2.number}번
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Symmetrical empty space for score layout alignment */}
-                      <div className="hidden md:block w-[72px]" />
-
-                      {/* RP Flow Visualizer for Winner 2 */}
-                      <div className="flex items-center justify-between md:justify-end gap-4 md:gap-6 bg-background/30 rounded-xl p-3 border border-border/20 md:min-w-[320px]">
-                        <div className="flex flex-col items-center">
-                          <span className="text-[10px] text-muted-foreground font-medium mb-1">이전</span>
-                          <TierBadge rp={resultData.winner2.prevRp} />
-                          <span className="font-mono text-[11px] font-semibold text-muted-foreground mt-0.5">{resultData.winner2.prevRp} RP</span>
-                        </div>
-                        
-                        <div className="flex flex-col items-center justify-center shrink-0">
-                          <span className="text-muted-foreground text-sm font-semibold">➔</span>
-                          <span className="text-[9px] font-black text-win bg-win/15 px-1.5 py-0.5 rounded border border-win/30 font-mono mt-1">+{resultData.winner2.rpDelta} RP</span>
-                        </div>
-
-                        <div className="flex flex-col items-center">
-                          <span className="text-[10px] text-neon-blue font-bold mb-1">최종</span>
-                          <TierBadge rp={resultData.winner2.finalRp} />
-                          <span className="font-mono text-xs font-black text-neon-blue mt-0.5">{resultData.winner2.finalRp} RP</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 🌟 Winner 2 Bonuses */}
-                  {resultData.winner2 && hasBonuses(resultData.winner2) && (
-                    <div className="pt-2 border-t border-win/10 flex flex-wrap items-center gap-2">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-win/80 mr-1">{resultData.winner2.name} 보상:</span>
-                      {renderBonuses(resultData.winner2)}
-                    </div>
-                  )}
+                {/* Right Column: Scoreboard Summary */}
+                <div className="flex flex-col h-full justify-between">
+                  {renderMatchSummary()}
                 </div>
               </div>
 
-              {/* Loser Stripe */}
-              <div className="relative overflow-hidden rounded-xl border border-loss/30 bg-loss/5 p-4 shadow-[0_0_15px_rgba(239,68,68,0.05)]">
-                <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-loss" />
-                
-                <div className="flex flex-col gap-4 pl-2">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    {/* Loser 1 profile */}
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="flex items-center justify-center px-2.5 py-1 rounded bg-loss/15 text-loss text-xs font-black tracking-widest border border-loss/30 uppercase">
-                        DEFEAT
-                      </span>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <GenderMark gender={resultData.loser.gender} className="size-4 text-[10px]" />
-                          <span className="text-lg font-black">{resultData.loser.name}</span>
-                        </div>
-                        <div className="text-[10px] text-muted-foreground mt-0.5">
-                          {resultData.loser.grade}학년 {resultData.loser.classNum}반 · {resultData.loser.number}번
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Symmetrical alignment space placeholder */}
-                    <div className="hidden md:flex items-center justify-center opacity-0 pointer-events-none select-none font-mono font-black text-2xl px-4 py-1.5">
-                      <span>0 : 0</span>
-                    </div>
-
-                    {/* RP Flow Visualizer */}
-                    <div className="flex items-center justify-between md:justify-end gap-4 md:gap-6 bg-background/30 rounded-xl p-3 border border-border/20 md:min-w-[320px]">
-                      <div className="flex flex-col items-center">
-                        <span className="text-[10px] text-muted-foreground font-medium mb-1">이전</span>
-                        <TierBadge rp={resultData.loser.prevRp} />
-                        <span className="font-mono text-[11px] font-semibold text-muted-foreground mt-0.5">{resultData.loser.prevRp} RP</span>
-                      </div>
-                      
-                      <div className="flex flex-col items-center justify-center shrink-0">
-                        <span className="text-muted-foreground text-sm font-semibold">➔</span>
-                        <span className="text-[9px] font-black text-loss bg-loss/15 px-1.5 py-0.5 rounded border border-loss/30 font-mono mt-1">{resultData.loser.rpDelta} RP</span>
-                      </div>
-
-                      <div className="flex flex-col items-center">
-                        <span className="text-[10px] text-muted-foreground font-semibold mb-1">최종</span>
-                        <TierBadge rp={resultData.loser.finalRp} />
-                        <span className="font-mono text-xs font-bold text-muted-foreground mt-0.5">{resultData.loser.finalRp} RP</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Loser 2 Profile & RP (if present) */}
-                  {resultData.loser2 && (
-                    <div className="border-t border-loss/10 pt-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="flex items-center justify-center px-2.5 py-1 rounded bg-loss/15 text-loss text-xs font-black tracking-widest border border-loss/30 uppercase">
-                          PARTNER
-                        </span>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <GenderMark gender={resultData.loser2.gender} className="size-4 text-[10px]" />
-                            <span className="text-lg font-black">{resultData.loser2.name}</span>
-                          </div>
-                          <div className="text-[10px] text-muted-foreground mt-0.5">
-                            {resultData.loser2.grade}학년 {resultData.loser2.classNum}반 · {resultData.loser2.number}번
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Symmetrical align space */}
-                      <div className="hidden md:block w-[72px]" />
-
-                      {/* RP Flow Visualizer for Loser 2 */}
-                      <div className="flex items-center justify-between md:justify-end gap-4 md:gap-6 bg-background/30 rounded-xl p-3 border border-border/20 md:min-w-[320px]">
-                        <div className="flex flex-col items-center">
-                          <span className="text-[10px] text-muted-foreground font-medium mb-1">이전</span>
-                          <TierBadge rp={resultData.loser2.prevRp} />
-                          <span className="font-mono text-[11px] font-semibold text-muted-foreground mt-0.5">{resultData.loser2.prevRp} RP</span>
-                        </div>
-                        
-                        <div className="flex flex-col items-center justify-center shrink-0">
-                          <span className="text-muted-foreground text-sm font-semibold">➔</span>
-                          <span className="text-[9px] font-black text-loss bg-loss/15 px-1.5 py-0.5 rounded border border-loss/30 font-mono mt-1">{resultData.loser2.rpDelta} RP</span>
-                        </div>
-
-                        <div className="flex flex-col items-center">
-                          <span className="text-[10px] text-muted-foreground font-semibold mb-1">최종</span>
-                          <TierBadge rp={resultData.loser2.finalRp} />
-                          <span className="font-mono text-xs font-bold text-muted-foreground mt-0.5">{resultData.loser2.finalRp} RP</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+              {/* Confirmation Close Button */}
+              <div className="relative z-10 w-full mt-6 flex justify-center shrink-0">
+                <Button
+                  onClick={() => {
+                    setShowModal(false);
+                    setResultData(null);
+                  }}
+                  className="h-12 px-12 bg-gradient-to-r from-cyan-600 via-cyan-500 to-cyan-600 hover:from-cyan-500 hover:to-cyan-400 text-white font-black uppercase tracking-widest shadow-[0_0_25px_rgba(0,180,216,0.35)] active:scale-95 transition-all w-full sm:w-auto rounded-lg border border-cyan-400/40"
+                >
+                  확인 (다음 경기)
+                </Button>
               </div>
 
             </div>
-
-            {/* Confirmation Close Button */}
-            <div className="relative z-10 w-full mt-6 flex justify-center shrink-0">
-              <Button
-                onClick={() => {
-                  setShowModal(false);
-                  setResultData(null);
-                }}
-                className="h-12 px-10 bg-gradient-to-r from-neon-blue to-tier-diamond text-primary-foreground font-black tracking-wide shadow-lg active:scale-95 transition-all w-full sm:w-auto"
-              >
-                확인 (다음 경기 입력)
-              </Button>
-            </div>
-
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 성별 정보 보완 팝업창 (LoL 테크니컬 디자인 다크모드) */}
       {genderModalOpen && genderTargetId && (() => {
