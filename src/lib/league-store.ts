@@ -2710,11 +2710,7 @@ const LeagueStoreContext = createContext<LeagueStoreType | null>(null);
 
 export function LeagueStoreProvider({ children }: { children: React.ReactNode }) {
   const store = useLeagueStoreInternal();
-  return (
-    <LeagueStoreContext.Provider value={store}>
-      {children}
-    </LeagueStoreContext.Provider>
-  );
+  return React.createElement(LeagueStoreContext.Provider, { value: store }, children);
 }
 
 export function useLeagueStore() {
