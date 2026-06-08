@@ -338,14 +338,15 @@ function useLeagueStoreInternal() {
   // 1-1. 전체 학생 동기화 (SYNC_ALL)
   const syncAllStudentsToGoogleSheets = useCallback(async (
     targetStudents: Student[],
-    previousStudents?: Student[]
+    previousStudents?: Student[],
+    isBackground = false
   ) => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
       return false;
     }
     if (!session || !session.scriptUrl) return true;
-    setIsSyncing(true);
+    if (!isBackground) setIsSyncing(true);
 
     try {
       const res = await fetch(session.scriptUrl!, {
@@ -389,7 +390,7 @@ function useLeagueStoreInternal() {
       }
       return false;
     } finally {
-      setIsSyncing(false);
+      if (!isBackground) setIsSyncing(false);
     }
   }, [session]);
 
@@ -1714,7 +1715,7 @@ function useLeagueStoreInternal() {
     saveJSON(STUDENTS_KEY, nextStudents);
     saveJSON(MATCHES_KEY, nextMatches);
 
-    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents, true);
   }, [students, matches, rpVariables, syncAllStudentsToGoogleSheets]);
 
   // 개별 학생 전적 리셋 및 동기화
@@ -1829,7 +1830,7 @@ function useLeagueStoreInternal() {
     setStudents(nextStudents);
     saveJSON(STUDENTS_KEY, nextStudents);
 
-    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents, true);
   }, [students, syncAllStudentsToGoogleSheets]);
 
   // 새로운 명렬표 대량 업서트 및 동기화
@@ -1904,7 +1905,7 @@ function useLeagueStoreInternal() {
     setStudents(nextStudents);
     saveJSON(STUDENTS_KEY, nextStudents);
 
-    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents, true);
   }, [students, syncAllStudentsToGoogleSheets]);
 
   // 개별 학생 삭제 및 연쇄 삭제 & 전적 복구 롤백
@@ -1994,7 +1995,7 @@ function useLeagueStoreInternal() {
     saveJSON(STUDENTS_KEY, nextStudents);
     saveJSON(MATCHES_KEY, nextMatches);
 
-    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents, true);
   }, [students, matches, rpVariables, syncAllStudentsToGoogleSheets]);
 
   // CSV 롤백 복원 액션
@@ -2046,7 +2047,7 @@ function useLeagueStoreInternal() {
       const previousStudents = [...students];
       setStudents(nextStudents);
       saveJSON(STUDENTS_KEY, nextStudents);
-      await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+      await syncAllStudentsToGoogleSheets(nextStudents, previousStudents, true);
     }
 
     return affectedCount;
@@ -2391,7 +2392,7 @@ function useLeagueStoreInternal() {
     saveJSON(STUDENTS_KEY, nextStudentsList);
     saveJSON(MATCHES_KEY, nextMatchesList);
 
-    await syncAllStudentsToGoogleSheets(nextStudentsList, previousStudents);
+    await syncAllStudentsToGoogleSheets(nextStudentsList, previousStudents, true);
   }, [matches, students, tierThresholds, rpVariables, syncAllStudentsToGoogleSheets]);
 
   // 리그 커스텀 설정 통합 저장 (마스터 DB 동기화 포함)
@@ -2608,7 +2609,6 @@ function useLeagueStoreInternal() {
       return;
     }
 
-    setIsSyncing(true);
     try {
       const res = await fetch(session.scriptUrl, {
         method: "POST",
@@ -2643,8 +2643,6 @@ function useLeagueStoreInternal() {
       }
     } catch (e) {
       console.error("Failed executing automatic RP decay backend call:", e);
-    } finally {
-      setIsSyncing(false);
     }
   }, [students, decayEnabled, decayDays, decayAmount, decayTiers, lastDecayDate, session, tierThresholds, title]);
 
