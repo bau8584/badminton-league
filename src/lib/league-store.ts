@@ -396,7 +396,7 @@ function useLeagueStoreInternal() {
   // 1. 단일 경기 기록 서버 원장 동기화 (RECORD_LEDGER)
   const recordMatchToGoogleSheets = useCallback(async (
     match: Match,
-    rpChange: Record<string, number>,
+    rpChanges: Record<string, number>,
     previousStudents?: Student[],
     previousMatches?: Match[]
   ) => {
@@ -417,7 +417,7 @@ function useLeagueStoreInternal() {
         body: JSON.stringify({
           action: "RECORD_LEDGER",
           match,
-          rpChange
+          rpChanges
         })
       });
 
@@ -1640,12 +1640,12 @@ function useLeagueStoreInternal() {
     setMatches(nextMatches);
     setStudents(nextStudents);
 
-    const rpChange: Record<string, number> = {};
+    const rpChanges: Record<string, number> = {};
     playerStats.forEach((p) => {
-      rpChange[p.id] = p.delta;
+      rpChanges[p.id] = p.delta;
     });
 
-    recordMatchToGoogleSheets(match, rpChange, students, matches);
+    recordMatchToGoogleSheets(match, rpChanges, students, matches);
 
     return match;
   }, [students, matches, recordMatchToGoogleSheets, rpVariables, tierThresholds]);
