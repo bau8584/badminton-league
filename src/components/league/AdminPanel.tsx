@@ -44,6 +44,57 @@ import {
 
 type Row = { grade: number; classNum: number; number: number; name: string; gender?: Gender };
 
+type PresetType = "standard" | "speedup" | "hardcore" | "underdog" | "custom";
+
+const PRESETS: Record<Exclude<PresetType, "custom">, {
+  Bronze: number;
+  Silver: number;
+  Gold: number;
+  Platinum: number;
+  Diamond: number;
+  winDelta: number;
+  loseDelta: number;
+}> = {
+  standard: { Bronze: 0, Silver: 1000, Gold: 1200, Platinum: 1400, Diamond: 1600, winDelta: 25, loseDelta: 20 },
+  speedup: { Bronze: 0, Silver: 800, Gold: 1000, Platinum: 1200, Diamond: 1400, winDelta: 50, loseDelta: 40 },
+  hardcore: { Bronze: 0, Silver: 1200, Gold: 1500, Platinum: 1800, Diamond: 2100, winDelta: 15, loseDelta: 25 },
+  underdog: { Bronze: 0, Silver: 1100, Gold: 1300, Platinum: 1500, Diamond: 1700, winDelta: 30, loseDelta: 15 }
+};
+
+const checkPreset = (
+  bronze: string,
+  silver: string,
+  gold: string,
+  platinum: string,
+  diamond: string,
+  win: string,
+  lose: string
+): PresetType => {
+  const b = parseInt(bronze, 10) || 0;
+  const s = parseInt(silver, 10) || 0;
+  const g = parseInt(gold, 10) || 0;
+  const p = parseInt(platinum, 10) || 0;
+  const d = parseInt(diamond, 10) || 0;
+  const w = parseInt(win, 10) || 0;
+  const l = parseInt(lose, 10) || 0;
+
+  for (const key of ["standard", "speedup", "hardcore", "underdog"] as const) {
+    const val = PRESETS[key];
+    if (
+      val.Bronze === b &&
+      val.Silver === s &&
+      val.Gold === g &&
+      val.Platinum === p &&
+      val.Diamond === d &&
+      val.winDelta === w &&
+      val.loseDelta === l
+    ) {
+      return key;
+    }
+  }
+  return "custom";
+};
+
 function detectGender(token: string): Gender | null {
   const t = token.trim();
   if (t === "남" || t === "M" || t === "m" || t === "남자") return "M";
@@ -515,24 +566,45 @@ export function AdminPanel({
   const [inputWinDelta, setInputWinDelta] = useState(rpVariables?.winDelta?.toString() ?? "25");
   const [inputLoseDelta, setInputLoseDelta] = useState(rpVariables?.loseDelta?.toString() ?? "20");
 
+  // 프리셋 선택 상태 (기본값 custom 또는 기존 로드값 분석)
+  const [preset, setPreset] = useState<PresetType>(() => {
+    const b = thresholds?.Bronze?.toString() ?? "0";
+    const s = thresholds?.Silver?.toString() ?? "1000";
+    const g = thresholds?.Gold?.toString() ?? "1200";
+    const p = thresholds?.Platinum?.toString() ?? "1400";
+    const d = thresholds?.Diamond?.toString() ?? "1600";
+    const win = rpVariables?.winDelta?.toString() ?? "25";
+    const lose = rpVariables?.loseDelta?.toString() ?? "20";
+    return checkPreset(b, s, g, p, d, win, lose);
+  });
+
   useEffect(() => {
     if (thresholds) {
-      setInputBronze(thresholds.Bronze?.toString() ?? "0");
-      setInputSilver(thresholds.Silver?.toString() ?? "1000");
-      setInputGold(thresholds.Gold?.toString() ?? "1200");
-      setInputPlatinum(thresholds.Platinum?.toString() ?? "1400");
-      setInputDiamond(thresholds.Diamond?.toString() ?? "1600");
+      const b = thresholds.Bronze?.toString() ?? "0";
+      const s = thresholds.Silver?.toString() ?? "1000";
+      const g = thresholds.Gold?.toString() ?? "1200";
+      const p = thresholds.Platinum?.toString() ?? "1400";
+      const d = thresholds.Diamond?.toString() ?? "1600";
+      setInputBronze(b);
+      setInputSilver(s);
+      setInputGold(g);
+      setInputPlatinum(p);
+      setInputDiamond(d);
+      setPreset(checkPreset(b, s, g, p, d, inputWinDelta, inputLoseDelta));
     }
   }, [thresholds]);
 
   useEffect(() => {
     if (rpVariables) {
-      setInputWinDelta(rpVariables.winDelta?.toString() ?? "25");
-      setInputLoseDelta(rpVariables.loseDelta?.toString() ?? "20");
+      const win = rpVariables.winDelta?.toString() ?? "25";
+      const lose = rpVariables.loseDelta?.toString() ?? "20";
+      setInputWinDelta(win);
+      setInputLoseDelta(lose);
+      setPreset(checkPreset(inputBronze, inputSilver, inputGold, inputPlatinum, inputDiamond, win, lose));
     }
   }, [rpVariables]);
 
-  const handleSaveSettings = () => {
+  const handleSaveSettings = async () => {
     const b = parseInt(inputBronze, 10);
     const s = parseInt(inputSilver, 10);
     const g = parseInt(inputGold, 10);
@@ -550,11 +622,20 @@ export function AdminPanel({
       return toast.error("점수 설정은 0점 이상이어야 합니다.");
     }
 
-    onUpdateSettings?.(
-      { Bronze: b, Silver: s, Gold: g, Platinum: p, Diamond: d },
-      { winDelta: winD, loseDelta: loseD }
-    );
-    toast.success("티어 기준 및 RP 변동폭 설정이 리그 전체에 즉시 반영되었습니다!");
+    const savePromise = (async () => {
+      if (onUpdateSettings) {
+        await onUpdateSettings(
+          { Bronze: b, Silver: s, Gold: g, Platinum: p, Diamond: d },
+          { winDelta: winD, loseDelta: loseD }
+        );
+      }
+    })();
+
+    toast.promise(savePromise, {
+      loading: "리그 설정 동기화 및 학생 데이터 재정렬 중...",
+      success: "티어 기준 및 RP 변동폭 설정이 반영되고 최신 랭킹으로 동기화되었습니다!",
+      error: "리그 설정 동기화 실패. 다시 시도해 주세요."
+    });
   };
 
   // 한 학급에 속한 학생들 목록 필터링
@@ -2469,20 +2550,68 @@ export function AdminPanel({
         )}>
           <div className="overflow-hidden min-h-0">
             <div className="space-y-6 pt-2">
+
+              {/* Preset Selection Dropdown */}
+              <div className="p-4 rounded-2xl bg-muted/30 border border-border/20 space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <span className="text-xs text-neon-blue font-bold uppercase tracking-wider block">설정 프리셋 선택 (Configuration Presets)</span>
+                    <span className="text-[10px] text-muted-foreground block">원하는 리그 방식의 프리셋을 선택하거나 세부 수치를 직접 조정할 수 있습니다.</span>
+                  </div>
+                  <div className="w-full sm:w-64">
+                    <select
+                      value={preset}
+                      onChange={(e) => {
+                        const nextPreset = e.target.value as PresetType;
+                        setPreset(nextPreset);
+                        if (nextPreset !== "custom") {
+                          const val = PRESETS[nextPreset];
+                          setInputBronze(val.Bronze.toString());
+                          setInputSilver(val.Silver.toString());
+                          setInputGold(val.Gold.toString());
+                          setInputPlatinum(val.Platinum.toString());
+                          setInputDiamond(val.Diamond.toString());
+                          setInputWinDelta(val.winDelta.toString());
+                          setInputLoseDelta(val.loseDelta.toString());
+                        }
+                      }}
+                      className="w-full h-10 border border-border/50 bg-background/60 rounded-xl px-3 text-xs font-semibold focus-visible:ring-neon-blue transition-all"
+                    >
+                      <option value="standard">⚖️ 스탠다드 (기본 리그 방식)</option>
+                      <option value="speedup">⚡ 스피드업 (빠른 티어 등반/강등)</option>
+                      <option value="hardcore">💀 하드코어 (상승은 좁고 하락은 깊게)</option>
+                      <option value="underdog">🦊 언더독 (패배 부담 경감/이변 장려)</option>
+                      <option value="custom">🛠️ 사용자 설정 (Custom)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               {/* Tier Thresholds Inputs Group with Sliders */}
               <div>
-                <span className="text-xs text-neon-blue font-bold uppercase tracking-wider block mb-3">티어별 최저 RP 기준점 (Tier Cutoffs Sliders)</span>
+                <span className="text-xs text-neon-blue font-bold uppercase tracking-wider block mb-3">티어별 최저 RP 기준점 (Tier Cutoffs Inputs & Sliders)</span>
                 <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-5 bg-card/40 p-5 rounded-2xl border border-border/30">
                   
                   {/* Bronze */}
                   <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs font-bold text-tier-bronze">브론즈</label>
-                      <span className="font-mono text-xs font-bold text-tier-bronze bg-tier-bronze/10 px-2 py-0.5 rounded">{inputBronze} RP</span>
+                    <div className="flex justify-between items-center gap-2">
+                      <label className="text-xs font-bold text-tier-bronze shrink-0">브론즈</label>
+                      <Input
+                        type="number"
+                        value={inputBronze}
+                        onChange={(e) => {
+                          setPreset("custom");
+                          setInputBronze(e.target.value);
+                        }}
+                        className="h-7 w-20 text-right font-mono text-xs font-bold text-tier-bronze bg-tier-bronze/5 border-tier-bronze/20 focus-visible:ring-tier-bronze py-0.5 px-2"
+                      />
                     </div>
                     <Slider
-                      value={[parseInt(inputBronze, 10) || 0]}
-                      onValueChange={(val) => setInputBronze(val[0].toString())}
+                      value={[Math.max(0, Math.min(1000, parseInt(inputBronze, 10) || 0))]}
+                      onValueChange={(val) => {
+                        setPreset("custom");
+                        setInputBronze(val[0].toString());
+                      }}
                       min={0}
                       max={1000}
                       step={10}
@@ -2492,13 +2621,24 @@ export function AdminPanel({
 
                   {/* Silver */}
                   <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs font-bold text-tier-silver">실버</label>
-                      <span className="font-mono text-xs font-bold text-tier-silver bg-tier-silver/10 px-2 py-0.5 rounded">{inputSilver} RP</span>
+                    <div className="flex justify-between items-center gap-2">
+                      <label className="text-xs font-bold text-tier-silver shrink-0">실버</label>
+                      <Input
+                        type="number"
+                        value={inputSilver}
+                        onChange={(e) => {
+                          setPreset("custom");
+                          setInputSilver(e.target.value);
+                        }}
+                        className="h-7 w-20 text-right font-mono text-xs font-bold text-tier-silver bg-tier-silver/5 border-tier-silver/20 focus-visible:ring-tier-silver py-0.5 px-2"
+                      />
                     </div>
                     <Slider
-                      value={[parseInt(inputSilver, 10) || 0]}
-                      onValueChange={(val) => setInputSilver(val[0].toString())}
+                      value={[Math.max(500, Math.min(2000, parseInt(inputSilver, 10) || 0))]}
+                      onValueChange={(val) => {
+                        setPreset("custom");
+                        setInputSilver(val[0].toString());
+                      }}
                       min={500}
                       max={2000}
                       step={10}
@@ -2508,13 +2648,24 @@ export function AdminPanel({
 
                   {/* Gold */}
                   <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs font-bold text-tier-gold">골드</label>
-                      <span className="font-mono text-xs font-bold text-tier-gold bg-tier-gold/10 px-2 py-0.5 rounded">{inputGold} RP</span>
+                    <div className="flex justify-between items-center gap-2">
+                      <label className="text-xs font-bold text-tier-gold shrink-0">골드</label>
+                      <Input
+                        type="number"
+                        value={inputGold}
+                        onChange={(e) => {
+                          setPreset("custom");
+                          setInputGold(e.target.value);
+                        }}
+                        className="h-7 w-20 text-right font-mono text-xs font-bold text-tier-gold bg-tier-gold/5 border-tier-gold/20 focus-visible:ring-tier-gold py-0.5 px-2"
+                      />
                     </div>
                     <Slider
-                      value={[parseInt(inputGold, 10) || 0]}
-                      onValueChange={(val) => setInputGold(val[0].toString())}
+                      value={[Math.max(800, Math.min(2500, parseInt(inputGold, 10) || 0))]}
+                      onValueChange={(val) => {
+                        setPreset("custom");
+                        setInputGold(val[0].toString());
+                      }}
                       min={800}
                       max={2500}
                       step={10}
@@ -2524,13 +2675,24 @@ export function AdminPanel({
 
                   {/* Platinum */}
                   <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs font-bold text-tier-platinum">플래티넘</label>
-                      <span className="font-mono text-xs font-bold text-tier-platinum bg-tier-platinum/10 px-2 py-0.5 rounded">{inputPlatinum} RP</span>
+                    <div className="flex justify-between items-center gap-2">
+                      <label className="text-xs font-bold text-tier-platinum shrink-0">플래티넘</label>
+                      <Input
+                        type="number"
+                        value={inputPlatinum}
+                        onChange={(e) => {
+                          setPreset("custom");
+                          setInputPlatinum(e.target.value);
+                        }}
+                        className="h-7 w-20 text-right font-mono text-xs font-bold text-tier-platinum bg-tier-platinum/5 border-tier-platinum/20 focus-visible:ring-tier-platinum py-0.5 px-2"
+                      />
                     </div>
                     <Slider
-                      value={[parseInt(inputPlatinum, 10) || 0]}
-                      onValueChange={(val) => setInputPlatinum(val[0].toString())}
+                      value={[Math.max(1000, Math.min(3000, parseInt(inputPlatinum, 10) || 0))]}
+                      onValueChange={(val) => {
+                        setPreset("custom");
+                        setInputPlatinum(val[0].toString());
+                      }}
                       min={1000}
                       max={3000}
                       step={10}
@@ -2540,13 +2702,24 @@ export function AdminPanel({
 
                   {/* Diamond */}
                   <div className="space-y-2 rounded-xl bg-background/30 p-3 border border-border/20">
-                    <div className="flex justify-between items-center">
-                      <label className="text-xs font-bold text-tier-diamond">다이아몬드</label>
-                      <span className="font-mono text-xs font-bold text-tier-diamond bg-tier-diamond/10 px-2 py-0.5 rounded">{inputDiamond} RP</span>
+                    <div className="flex justify-between items-center gap-2">
+                      <label className="text-xs font-bold text-tier-diamond shrink-0">다이아몬드</label>
+                      <Input
+                        type="number"
+                        value={inputDiamond}
+                        onChange={(e) => {
+                          setPreset("custom");
+                          setInputDiamond(e.target.value);
+                        }}
+                        className="h-7 w-20 text-right font-mono text-xs font-bold text-tier-diamond bg-tier-diamond/5 border-tier-diamond/20 focus-visible:ring-tier-diamond py-0.5 px-2"
+                      />
                     </div>
                     <Slider
-                      value={[parseInt(inputDiamond, 10) || 0]}
-                      onValueChange={(val) => setInputDiamond(val[0].toString())}
+                      value={[Math.max(1200, Math.min(3500, parseInt(inputDiamond, 10) || 0))]}
+                      onValueChange={(val) => {
+                        setPreset("custom");
+                        setInputDiamond(val[0].toString());
+                      }}
                       min={1200}
                       max={3500}
                       step={10}
@@ -2570,7 +2743,10 @@ export function AdminPanel({
                     <Input
                       type="number"
                       value={inputWinDelta}
-                      onChange={(e) => setInputWinDelta(e.target.value)}
+                      onChange={(e) => {
+                        setPreset("custom");
+                        setInputWinDelta(e.target.value);
+                      }}
                       className="font-mono font-bold bg-background/60 border-win/30 text-win focus-visible:ring-win"
                       placeholder="예: 25"
                     />
@@ -2585,7 +2761,10 @@ export function AdminPanel({
                     <Input
                       type="number"
                       value={inputLoseDelta}
-                      onChange={(e) => setInputLoseDelta(e.target.value)}
+                      onChange={(e) => {
+                        setPreset("custom");
+                        setInputLoseDelta(e.target.value);
+                      }}
                       className="font-mono font-bold bg-background/60 border-loss/30 text-loss focus-visible:ring-loss"
                       placeholder="예: 20"
                     />

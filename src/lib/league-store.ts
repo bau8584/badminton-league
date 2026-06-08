@@ -417,7 +417,11 @@ function useLeagueStoreInternal() {
         body: JSON.stringify({
           action: "RECORD_LEDGER",
           match,
-          rpChanges
+          rpChanges,
+          settings: {
+            tierThresholds,
+            rpVariables
+          }
         })
       });
 
@@ -1886,10 +1890,18 @@ function useLeagueStoreInternal() {
   );
 
   // 리그전 커스텀 설정 캘리브레이션 업데이트 함수
-  const updateLeagueSettings = useCallback((thresholds: Record<TierName, number>, rpVars: { winDelta: number; loseDelta: number }) => {
+  const updateLeagueSettings = useCallback(async (thresholds: Record<TierName, number>, rpVars: { winDelta: number; loseDelta: number }) => {
     setTierThresholds(thresholds);
     setRpVariables(rpVars);
-  }, []);
+
+    // 즉시 반영
+    // 이 코드는 시스템의 핵심인 점수 연산 로직이므로, 수정 즉시 SYNC_ALL을 통해 전체 학생 데이터를 최신 설정값 기반으로 재정렬할 수 있도록 해줘.
+    const sortedStudents = [...students].sort((a, b) => b.rp - a.rp);
+    setStudents(sortedStudents);
+    saveJSON(STUDENTS_KEY, sortedStudents);
+
+    await syncAllStudentsToGoogleSheets(sortedStudents, students, true);
+  }, [students, syncAllStudentsToGoogleSheets]);
 
   // 특정 학생의 성별 변경 및 구글 시트 동기화
   const updateStudentGender = useCallback(async (studentId: string, gender: Gender) => {
