@@ -170,7 +170,7 @@ type UserSession = {
   scriptUrl: string;
   studentId?: string;
   leagueName?: string;
-  settingsBonus?: string | Record<string, boolean>;
+  settingsBonus?: string | Record<string, any>;
 } | null;
 
 function useLeagueStoreInternal() {
@@ -229,7 +229,15 @@ function useLeagueStoreInternal() {
     comebackRp: 10,
     marginEnabled: true,
     marginDiff: 10,
-    marginRp: 10
+    marginRp: 10,
+    firstWinEnabled: true,
+    firstWinRp: 15,
+    revengeEnabled: true,
+    revengeRp: 10,
+    underdogEnabled: true,
+    underdogPercent: 10,
+    rivalEnabled: true,
+    rivalRp: 5
   });
 
   const [activeBonuses, setActiveBonuses] = useState<ActiveBonuses>({
@@ -283,8 +291,31 @@ function useLeagueStoreInternal() {
         saveJSON(TIER_SETTINGS_KEY, s.tierSettings);
       }
       if (s.bonuses !== undefined) {
-        setDynamicBonuses(s.bonuses);
-        saveJSON(NEW_BONUSES_KEY, s.bonuses);
+        const mergedBonuses = {
+          freshnessEnabled: true,
+          freshnessGames: 5,
+          freshnessRp: 5,
+          streakEnabled: true,
+          streakWins: 3,
+          streakRp: 10,
+          comebackEnabled: true,
+          comebackLosses: 3,
+          comebackRp: 10,
+          marginEnabled: true,
+          marginDiff: 10,
+          marginRp: 10,
+          firstWinEnabled: true,
+          firstWinRp: 15,
+          revengeEnabled: true,
+          revengeRp: 10,
+          underdogEnabled: true,
+          underdogPercent: 10,
+          rivalEnabled: true,
+          rivalRp: 5,
+          ...s.bonuses
+        };
+        setDynamicBonuses(mergedBonuses);
+        saveJSON(NEW_BONUSES_KEY, mergedBonuses);
       }
     }
     const lDecayDate = data.lastDecayDate || (data.settings && data.settings.lastDecayDate);
@@ -938,7 +969,31 @@ function useLeagueStoreInternal() {
       if (localTierSettings) setTierSettings(localTierSettings);
 
       const localNewBonuses = loadJSON<DynamicBonuses | null>(NEW_BONUSES_KEY, null);
-      if (localNewBonuses) setDynamicBonuses(localNewBonuses);
+      if (localNewBonuses) {
+        setDynamicBonuses({
+          freshnessEnabled: true,
+          freshnessGames: 5,
+          freshnessRp: 5,
+          streakEnabled: true,
+          streakWins: 3,
+          streakRp: 10,
+          comebackEnabled: true,
+          comebackLosses: 3,
+          comebackRp: 10,
+          marginEnabled: true,
+          marginDiff: 10,
+          marginRp: 10,
+          firstWinEnabled: true,
+          firstWinRp: 15,
+          revengeEnabled: true,
+          revengeRp: 10,
+          underdogEnabled: true,
+          underdogPercent: 10,
+          rivalEnabled: true,
+          rivalRp: 5,
+          ...(localNewBonuses as any)
+        });
+      }
 
       const isGuest = cachedSession?.loginId === "guest" || cachedSession?.schoolName?.includes("꿈나무");
       let activeStudents = localStudents !== null ? localStudents : SEED_STUDENTS;
@@ -1200,33 +1255,36 @@ function useLeagueStoreInternal() {
       let mentoringBonus = 0;
 
       const playerTier = getTier(student.rp, tierThresholds);
-      const baseWin = tierSettings[playerTier]?.winDelta ?? rpVariables.winDelta;
-      const baseLoss = tierSettings[playerTier]?.loseDelta ?? rpVariables.loseDelta;
+      const baseWin = playerTier !== "Diamond" 
+        ? (tierSettings[playerTier as keyof TierSettings]?.winDelta ?? rpVariables.winDelta) 
+        : rpVariables.winDelta;
+      const baseLoss = playerTier !== "Diamond" 
+        ? (tierSettings[playerTier as keyof TierSettings]?.loseDelta ?? rpVariables.loseDelta) 
+        : rpVariables.loseDelta;
 
       if (won) {
-        if (activeBonuses.underdog && opponents.length > 0) {
+        if (dynamicBonuses?.underdogEnabled && opponents.length > 0) {
           const playerTierRank = TIER_RANKING[playerTier] ?? 1;
           const maxOppRp = Math.max(...opponents.map((o) => o.rp));
           const maxOppTier = getTier(maxOppRp, tierThresholds);
           const maxOppTierRank = TIER_RANKING[maxOppTier] ?? 1;
           if (playerTierRank < maxOppTierRank) {
-            underdogBonus = Math.max(0, Math.floor((maxOppRp - student.rp) * 0.1));
+            underdogBonus = Math.max(0, Math.floor((maxOppRp - student.rp) * ((dynamicBonuses.underdogPercent ?? 10) / 100)));
           }
         }
 
-        if (activeBonuses.scoreDiff) {
-          scoreDiffBonus = Math.abs(scoreA - scoreB);
+        // 득점차 보너스는 폐지 (0점 처리)
+        scoreDiffBonus = 0;
+
+        if (dynamicBonuses?.rivalEnabled) {
+          rivalBonus = opponents.some((o) => Math.abs(student.rp - o.rp) <= 20) ? (dynamicBonuses.rivalRp ?? 5) : 0;
         }
 
-        if (activeBonuses.rival) {
-          rivalBonus = opponents.some((o) => Math.abs(student.rp - o.rp) <= 20) ? 5 : 0;
+        if (dynamicBonuses?.firstWinEnabled) {
+          firstWinBonus = student.lastWinDate !== todayYmd ? (dynamicBonuses.firstWinRp ?? 15) : 0;
         }
 
-        if (activeBonuses.firstWin) {
-          firstWinBonus = student.lastWinDate !== todayYmd ? 15 : 0;
-        }
-
-        if (activeBonuses.revenge) {
+        if (dynamicBonuses?.revengeEnabled) {
           const hasPastLoss = matches.some((m) => {
             const mTeamA = [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
             const mTeamB = [m.playerBId, m.playerB2Id].filter(Boolean) as string[];
@@ -1247,7 +1305,7 @@ function useLeagueStoreInternal() {
             }
             return false;
           });
-          revengeBonus = hasPastLoss ? 10 : 0;
+          revengeBonus = hasPastLoss ? (dynamicBonuses.revengeRp ?? 10) : 0;
         }
 
         // A. 신선도 보너스 (Freshness)
@@ -1258,9 +1316,9 @@ function useLeagueStoreInternal() {
             .slice(0, dynamicBonuses.freshnessGames);
           
           const facedOpponent = lastNMatches.some((m) => {
-            const mOppIds = (m.playerAId === student.id || m.playerA2Id === student.id)
+            const mOppIds = ((m.playerAId === student.id || m.playerA2Id === student.id)
               ? [m.playerBId, m.playerB2Id].filter(Boolean)
-              : [m.playerAId, m.playerA2Id].filter(Boolean);
+              : [m.playerAId, m.playerA2Id].filter(Boolean)) as string[];
             return mOppIds.some((oppId) => oppIds.includes(oppId));
           });
           if (!facedOpponent) {
@@ -1298,8 +1356,8 @@ function useLeagueStoreInternal() {
           }
         }
 
-        // D. 압승 보너스 - 복식용 (Margin)
-        if (dynamicBonuses?.marginEnabled && matchType === "double") {
+        // D. 압승 (단식/복식 통합 기준 적용) (Margin)
+        if (dynamicBonuses?.marginEnabled) {
           const scoreDiff = Math.abs(scoreA - scoreB);
           if (scoreDiff >= dynamicBonuses.marginDiff) {
             marginBonus = dynamicBonuses.marginRp;
@@ -1960,32 +2018,40 @@ function useLeagueStoreInternal() {
       let rivalBonus = 0;
       let firstWinBonus = 0;
       let revengeBonus = 0;
+      let marginBonus = 0;
+      let mentoringBonus = 0;
+
+      const playerTier = getTier(student.rp, tierThresholds);
+      const baseWin = playerTier !== "Diamond" 
+        ? (tierSettings[playerTier as keyof TierSettings]?.winDelta ?? rpVariables.winDelta) 
+        : rpVariables.winDelta;
+      const baseLoss = playerTier !== "Diamond" 
+        ? (tierSettings[playerTier as keyof TierSettings]?.loseDelta ?? rpVariables.loseDelta) 
+        : rpVariables.loseDelta;
 
       if (won) {
-        if (activeBonuses.underdog && opponents.length > 0) {
-          const playerTier = getTier(student.rp, tierThresholds);
+        if (dynamicBonuses?.underdogEnabled && opponents.length > 0) {
           const playerTierRank = TIER_RANKING[playerTier] ?? 1;
           const maxOppRp = Math.max(...opponents.map((o) => o.rp));
           const maxOppTier = getTier(maxOppRp, tierThresholds);
           const maxOppTierRank = TIER_RANKING[maxOppTier] ?? 1;
           if (playerTierRank < maxOppTierRank) {
-            underdogBonus = Math.max(0, Math.floor((maxOppRp - student.rp) * 0.1));
+            underdogBonus = Math.max(0, Math.floor((maxOppRp - student.rp) * ((dynamicBonuses.underdogPercent ?? 10) / 100)));
           }
         }
 
-        if (activeBonuses.scoreDiff) {
-          scoreDiffBonus = Math.abs(nextScoreA - nextScoreB);
+        // 득점차 보너스는 폐지 (0점 처리)
+        scoreDiffBonus = 0;
+
+        if (dynamicBonuses?.rivalEnabled) {
+          rivalBonus = opponents.some((o) => Math.abs(student.rp - o.rp) <= 20) ? (dynamicBonuses.rivalRp ?? 5) : 0;
         }
 
-        if (activeBonuses.rival) {
-          rivalBonus = opponents.some((o) => Math.abs(student.rp - o.rp) <= 20) ? 5 : 0;
+        if (dynamicBonuses?.firstWinEnabled) {
+          firstWinBonus = student.lastWinDate !== todayYmd ? (dynamicBonuses.firstWinRp ?? 15) : 0;
         }
 
-        if (activeBonuses.firstWin) {
-          firstWinBonus = student.lastWinDate !== todayYmd ? 15 : 0;
-        }
-
-        if (activeBonuses.revenge) {
+        if (dynamicBonuses?.revengeEnabled) {
           const pastMatches = matches.filter((m) => m.id !== matchId);
           const hasPastLoss = pastMatches.some((m) => {
             const mTeamA = [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
@@ -2007,13 +2073,37 @@ function useLeagueStoreInternal() {
             }
             return false;
           });
-          revengeBonus = hasPastLoss ? 10 : 0;
+          revengeBonus = hasPastLoss ? (dynamicBonuses.revengeRp ?? 10) : 0;
+        }
+
+        // D. 압승 (단식/복식 통합 기준 적용) (Margin)
+        if (dynamicBonuses?.marginEnabled) {
+          const scoreDiff = Math.abs(nextScoreA - nextScoreB);
+          if (scoreDiff >= dynamicBonuses.marginDiff) {
+            marginBonus = dynamicBonuses.marginRp;
+          }
+        }
+
+        // E. 멘토링 보너스 - 복식용 (Mentoring)
+        if (match.matchType === "double") {
+          const partnerId = p.role === "A" ? playerA2Id : p.role === "A2" ? playerAId : p.role === "B" ? playerB2Id : playerBId;
+          if (partnerId) {
+            const partner = rolledBackStudents.find((s) => s.id === partnerId);
+            if (partner) {
+              const partnerTier = getTier(partner.rp, tierThresholds);
+              const myTierRank = TIER_RANKING[playerTier] ?? 1;
+              const partnerTierRank = TIER_RANKING[partnerTier] ?? 1;
+              if (myTierRank > partnerTierRank) {
+                mentoringBonus = 3;
+              }
+            }
+          }
         }
       }
 
       const delta = won 
-        ? (rpVariables.winDelta + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus)
-        : -rpVariables.loseDelta;
+        ? (baseWin + underdogBonus + scoreDiffBonus + rivalBonus + firstWinBonus + revengeBonus + marginBonus + mentoringBonus)
+        : -baseLoss;
 
       return {
         id: student.id,
@@ -2025,7 +2115,9 @@ function useLeagueStoreInternal() {
         scoreDiffBonus,
         rivalBonus,
         firstWinBonus,
-        revengeBonus
+        revengeBonus,
+        marginBonus,
+        mentoringBonus
       };
     }).filter(Boolean) as {
       id: string;
@@ -2038,6 +2130,8 @@ function useLeagueStoreInternal() {
       rivalBonus: number;
       firstWinBonus: number;
       revengeBonus: number;
+      marginBonus: number;
+      mentoringBonus: number;
     }[];
 
     const statA = playerStats.find((p) => p.role === "A");
@@ -2103,6 +2197,14 @@ function useLeagueStoreInternal() {
       revengeBonusB: statB?.revengeBonus ?? 0,
       revengeBonusA2: statA2?.revengeBonus ?? 0,
       revengeBonusB2: statB2?.revengeBonus ?? 0,
+      marginBonusA: statA?.marginBonus ?? 0,
+      marginBonusB: statB?.marginBonus ?? 0,
+      marginBonusA2: statA2?.marginBonus ?? 0,
+      marginBonusB2: statB2?.marginBonus ?? 0,
+      mentoringBonusA: statA?.mentoringBonus ?? 0,
+      mentoringBonusB: statB?.mentoringBonus ?? 0,
+      mentoringBonusA2: statA2?.mentoringBonus ?? 0,
+      mentoringBonusB2: statB2?.mentoringBonus ?? 0,
     };
 
     // 4. Update both students' stats with the new deltas
@@ -2627,7 +2729,7 @@ function useLeagueStoreInternal() {
       {
         id: "avatar_of_revenge",
         name: "복수의 화신",
-        description: "복수전 성공 보너스 3회 누적 획득",
+        description: "복수전 성공 3회 누적 획득",
         tier: "Rare",
         currentValue: revengeCount,
         targetValue: 3,
@@ -2655,7 +2757,7 @@ function useLeagueStoreInternal() {
       {
         id: "rival_destroyer",
         name: "라이벌 파괴자",
-        description: "라이벌 격퇴 보너스 15회 누적 획득",
+        description: "라이벌 격파 15회 누적 획득",
         tier: "Epic",
         currentValue: rivalCount,
         targetValue: 15,

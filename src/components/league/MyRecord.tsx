@@ -376,7 +376,7 @@ export function MyRecord({
                 const oppIds = isTeamA 
                   ? [m.playerBId, m.playerB2Id].filter(Boolean) as string[]
                   : [m.playerAId, m.playerA2Id].filter(Boolean) as string[];
-                const oppPlayers = oppIds.map(id => students.find((s) => s.id === id)).filter(Boolean);
+                const oppPlayers = oppIds.map(id => students.find((s) => s.id === id)).filter(Boolean) as Student[];
                 const oppName = oppPlayers.map(o => o.name).join(" & ") || "탈퇴한 학생";
                 const oppClass = oppPlayers[0] ? `${oppPlayers[0].grade}학년 ${oppPlayers[0].classNum}반` : "기타 소속";
                 

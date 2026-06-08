@@ -167,4 +167,12 @@ export type DynamicBonuses = {
   marginEnabled: boolean;
   marginDiff: number;
   marginRp: number;
+  firstWinEnabled: boolean;
+  firstWinRp: number;
+  revengeEnabled: boolean;
+  revengeRp: number;
+  underdogEnabled: boolean;
+  underdogPercent: number;
+  rivalEnabled: boolean;
+  rivalRp: number;
 };

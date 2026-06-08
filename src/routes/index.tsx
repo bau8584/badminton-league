@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Crown, Swords, Trophy, Users, Pencil, Target, LogOut, School, ShieldAlert, Award } from "lucide-react";
 import { MyAchievements } from "@/components/league/MyAchievements";
-import { PromotionCelebration } from "@/components/league/PromotionCelebration";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -442,18 +441,6 @@ function Index() {
         )}
       </main>
 
-      {promotionEvent?.isPromoted && (
-        <PromotionCelebration
-          studentName={promotionEvent.studentName}
-          newTier={promotionEvent.newTier}
-          onConfirm={() => {
-            setPromotionEvent(null);
-            if (session?.role === "STUDENT") {
-              setTab("myRecord");
-            }
-          }}
-        />
-      )}
     </div>
   );
 }

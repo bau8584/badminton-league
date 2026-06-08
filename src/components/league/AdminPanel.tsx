@@ -810,7 +810,7 @@ export function AdminPanel({
   return (
     <div className="space-y-6">
       
-      {/* 1. League Configuration: Title and Bonus Toggles (리그 환경 설정) */}
+      {/* 1. League Configuration: Title and Rules Settings (리그 통합 설정) */}
       <Card className="border border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl relative overflow-hidden">
         {/* Clickable Header for Collapsible Toggle */}
         <div 
@@ -820,10 +820,10 @@ export function AdminPanel({
           <div className="flex-1 pr-4">
             <div className="flex items-center gap-2 text-neon-blue">
               <Settings className="size-5" />
-              <h3 className="font-black text-lg">리그 환경 설정 (League Configurations)</h3>
+              <h3 className="font-black text-lg">리그 통합 설정 (League Configurations)</h3>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              리그의 이름과 경기 진행 시 지급할 각종 보너스 RP 규칙을 설정하고 관리합니다.
+              리그의 이름과 경기 진행 시 적용될 8가지 점수 획득 규칙을 통합하여 설정하고 관리합니다.
             </p>
           </div>
           <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-muted/40 border border-border/20 text-xs font-black text-muted-foreground group-hover:text-foreground group-hover:bg-muted/80 group-hover:border-neon-blue/30 transition-all shrink-0">
@@ -845,9 +845,9 @@ export function AdminPanel({
               <Button
                 onClick={async (e) => {
                   e.stopPropagation();
-                  if (saveLeagueSettings) {
+                  if (onSaveLeagueSettings) {
                     try {
-                      await saveLeagueSettings(localTitle, localBonuses, undefined, localTierSettings, localDynamicBonuses);
+                      await onSaveLeagueSettings(localTitle, localBonuses, undefined, localTierSettings, localDynamicBonuses);
                       toast.success("리그 설정이 성공적으로 업데이트되었습니다.");
                     } catch (e) {
                       toast.error("설정 저장에 실패했습니다.");
@@ -862,7 +862,7 @@ export function AdminPanel({
 
             <div className="grid gap-6 md:grid-cols-2">
               {/* League Title Setting */}
-              <div className="space-y-2 rounded-xl bg-background/30 p-5 border border-border/20">
+              <div className="space-y-2 rounded-xl bg-background/30 p-5 border border-border/20 md:col-span-2">
                 <label className="text-xs font-bold text-neon-blue block uppercase tracking-wider">리그 이름 설정</label>
                 <div className="relative">
                   <Input
@@ -874,118 +874,346 @@ export function AdminPanel({
                   />
                 </div>
                 <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
-                  학생들이 로그인했을 때 화면 상단에 표시되는 공식 리그 명칭입니다.
+                  선수들이 로그인했을 때 화면 상단에 표시되는 공식 리그 명칭입니다.
                 </p>
               </div>
 
-              {/* Bonus RP Toggles */}
-              <div className="space-y-4 rounded-xl bg-background/30 p-5 border border-border/20">
-                <span className="text-xs font-bold text-neon-blue block uppercase tracking-wider">보너스 RP 스위치</span>
-                <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
+              {/* Unified 8 Settings */}
+              <div className="space-y-4 rounded-xl bg-background/30 p-5 border border-border/20 md:col-span-2">
+                <span className="text-xs font-bold text-neon-blue block uppercase tracking-wider">획득 점수 규칙 설정 (총 8개 항목)</span>
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
                   
-                  {/* firstWin */}
-                  <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
-                    <div className="flex flex-col">
+                  {/* 1. 오늘의 첫 승 */}
+                  <div className="flex flex-col justify-between p-3.5 rounded-lg border border-border/30 bg-background/25 space-y-2.5">
+                    <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-foreground">🌟 오늘의 첫 승</span>
-                      <span className="text-[9px] text-muted-foreground mt-0.5">+15 RP 보너스</span>
+                      <button
+                        type="button"
+                        onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, firstWinEnabled: !prev.firstWinEnabled }))}
+                        className={cn(
+                          "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
+                          localDynamicBonuses.firstWinEnabled ? "bg-neon-blue" : "bg-muted"
+                        )}
+                      >
+                        <div className={cn(
+                          "size-5 rounded-full bg-white transition-transform shadow-sm",
+                          localDynamicBonuses.firstWinEnabled ? "translate-x-4" : "translate-x-0"
+                        )} />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setLocalBonuses(prev => ({ ...prev, firstWin: !prev.firstWin }))}
-                      className={cn(
-                        "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
-                        localBonuses.firstWin ? "bg-neon-blue" : "bg-muted"
-                      )}
-                    >
-                      <div className={cn(
-                        "size-5 rounded-full bg-white transition-transform shadow-sm",
-                        localBonuses.firstWin ? "translate-x-4" : "translate-x-0"
-                      )} />
-                    </button>
+                    <div className="flex items-center gap-2 text-xs">
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.firstWinRp}
+                        disabled={!localDynamicBonuses.firstWinEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, firstWinRp: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-20 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue"
+                      />
+                      <span className="text-[11px] text-muted-foreground">RP 추가</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      오늘 첫 매치 승리 시 지급되는 점수입니다.
+                    </p>
                   </div>
 
-                  {/* revenge */}
-                  <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
-                    <div className="flex flex-col">
+                  {/* 2. 복수전 성공 */}
+                  <div className="flex flex-col justify-between p-3.5 rounded-lg border border-border/30 bg-background/25 space-y-2.5">
+                    <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-foreground">😈 복수전 성공</span>
-                      <span className="text-[9px] text-muted-foreground mt-0.5">+10 RP 보너스</span>
+                      <button
+                        type="button"
+                        onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, revengeEnabled: !prev.revengeEnabled }))}
+                        className={cn(
+                          "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
+                          localDynamicBonuses.revengeEnabled ? "bg-neon-blue" : "bg-muted"
+                        )}
+                      >
+                        <div className={cn(
+                          "size-5 rounded-full bg-white transition-transform shadow-sm",
+                          localDynamicBonuses.revengeEnabled ? "translate-x-4" : "translate-x-0"
+                        )} />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setLocalBonuses(prev => ({ ...prev, revenge: !prev.revenge }))}
-                      className={cn(
-                        "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
-                        localBonuses.revenge ? "bg-neon-blue" : "bg-muted"
-                      )}
-                    >
-                      <div className={cn(
-                        "size-5 rounded-full bg-white transition-transform shadow-sm",
-                        localBonuses.revenge ? "translate-x-4" : "translate-x-0"
-                      )} />
-                    </button>
+                    <div className="flex items-center gap-2 text-xs">
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.revengeRp}
+                        disabled={!localDynamicBonuses.revengeEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, revengeRp: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-20 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue"
+                      />
+                      <span className="text-[11px] text-muted-foreground">RP 추가</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      이전 경기에서 패했던 상대에게 복수 성공 시 지급되는 점수입니다.
+                    </p>
                   </div>
 
-                  {/* underdog */}
-                  <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
-                    <div className="flex flex-col">
+                  {/* 3. 언더독 격파 */}
+                  <div className="flex flex-col justify-between p-3.5 rounded-lg border border-border/30 bg-background/25 space-y-2.5">
+                    <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-foreground">🛡️ 언더독 격파</span>
-                      <span className="text-[9px] text-muted-foreground mt-0.5">점수 차 비례(10%)</span>
+                      <button
+                        type="button"
+                        onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, underdogEnabled: !prev.underdogEnabled }))}
+                        className={cn(
+                          "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
+                          localDynamicBonuses.underdogEnabled ? "bg-neon-blue" : "bg-muted"
+                        )}
+                      >
+                        <div className={cn(
+                          "size-5 rounded-full bg-white transition-transform shadow-sm",
+                          localDynamicBonuses.underdogEnabled ? "translate-x-4" : "translate-x-0"
+                        )} />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setLocalBonuses(prev => ({ ...prev, underdog: !prev.underdog }))}
-                      className={cn(
-                        "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
-                        localBonuses.underdog ? "bg-neon-blue" : "bg-muted"
-                      )}
-                    >
-                      <div className={cn(
-                        "size-5 rounded-full bg-white transition-transform shadow-sm",
-                        localBonuses.underdog ? "translate-x-4" : "translate-x-0"
-                      )} />
-                    </button>
+                    <div className="flex items-center gap-2 text-xs">
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.underdogPercent}
+                        disabled={!localDynamicBonuses.underdogEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, underdogPercent: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-20 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue"
+                      />
+                      <span className="text-[11px] text-muted-foreground">% 추가 (점수 차이 비례)</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      더 높은 티어의 상대를 이겼을 때, 상대와의 점수 차이에 비례해 지급되는 비율입니다.
+                    </p>
                   </div>
 
-                  {/* scoreDiff */}
-                  <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold text-foreground">🔥 압승 보너스</span>
-                      <span className="text-[9px] text-muted-foreground mt-0.5">대승 시 추가 보너스</span>
+                  {/* 4. 압승 (단식/복식 통합 기준 적용) */}
+                  <div className="flex flex-col justify-between p-3.5 rounded-lg border border-border/30 bg-background/25 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-foreground">🚀 압승 (단식/복식 통합 기준 적용)</span>
+                      <button
+                        type="button"
+                        onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, marginEnabled: !prev.marginEnabled }))}
+                        className={cn(
+                          "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
+                          localDynamicBonuses.marginEnabled ? "bg-neon-blue" : "bg-muted"
+                        )}
+                      >
+                        <div className={cn(
+                          "size-5 rounded-full bg-white transition-transform shadow-sm",
+                          localDynamicBonuses.marginEnabled ? "translate-x-4" : "translate-x-0"
+                        )} />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setLocalBonuses(prev => ({ ...prev, scoreDiff: !prev.scoreDiff }))}
-                      className={cn(
-                        "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
-                        localBonuses.scoreDiff ? "bg-neon-blue" : "bg-muted"
-                      )}
-                    >
-                      <div className={cn(
-                        "size-5 rounded-full bg-white transition-transform shadow-sm",
-                        localBonuses.scoreDiff ? "translate-x-4" : "translate-x-0"
-                      )} />
-                    </button>
+                    <div className="flex items-center gap-1.5 text-xs flex-wrap">
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.marginDiff}
+                        disabled={!localDynamicBonuses.marginEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, marginDiff: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-14 h-8 text-center font-mono font-bold bg-background/50 border-border/30"
+                      />
+                      <span className="text-[11px] text-muted-foreground">점 차 이상 승리 시</span>
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.marginRp}
+                        disabled={!localDynamicBonuses.marginEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, marginRp: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-14 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue border-neon-blue/30"
+                      />
+                      <span className="font-bold text-neon-blue text-[11px]">점 추가</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      설정한 점수 차 이상으로 대승 시 지급되는 점수입니다. (단식/복식 모두 적용)
+                    </p>
                   </div>
 
-                  {/* rival */}
-                  <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/30 bg-background/25">
-                    <div className="flex flex-col">
+                  {/* 5. 라이벌 격파 */}
+                  <div className="flex flex-col justify-between p-3.5 rounded-lg border border-border/30 bg-background/25 space-y-2.5">
+                    <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-foreground">⚔️ 라이벌 격파</span>
-                      <span className="text-[9px] text-muted-foreground mt-0.5">+5 RP 보너스</span>
+                      <button
+                        type="button"
+                        onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, rivalEnabled: !prev.rivalEnabled }))}
+                        className={cn(
+                          "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
+                          localDynamicBonuses.rivalEnabled ? "bg-neon-blue" : "bg-muted"
+                        )}
+                      >
+                        <div className={cn(
+                          "size-5 rounded-full bg-white transition-transform shadow-sm",
+                          localDynamicBonuses.rivalEnabled ? "translate-x-4" : "translate-x-0"
+                        )} />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setLocalBonuses(prev => ({ ...prev, rival: !prev.rival }))}
-                      className={cn(
-                        "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5",
-                        localBonuses.rival ? "bg-neon-blue" : "bg-muted"
-                      )}
-                    >
-                      <div className={cn(
-                        "size-5 rounded-full bg-white transition-transform shadow-sm",
-                        localBonuses.rival ? "translate-x-4" : "translate-x-0"
-                      )} />
-                    </button>
+                    <div className="flex items-center gap-2 text-xs">
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.rivalRp}
+                        disabled={!localDynamicBonuses.rivalEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, rivalRp: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-20 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue"
+                      />
+                      <span className="text-[11px] text-muted-foreground">RP 추가</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      자신과 RP 차이가 20 이하인 비슷한 수준의 라이벌을 격파했을 때 지급되는 점수입니다.
+                    </p>
+                  </div>
+
+                  {/* 6. 신선한 매치 (기존 신선도) */}
+                  <div className="flex flex-col justify-between p-3.5 rounded-lg border border-border/30 bg-background/25 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-foreground">✨ 신선한 매치 (기존 신선도)</span>
+                      <button
+                        type="button"
+                        onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, freshnessEnabled: !prev.freshnessEnabled }))}
+                        className={cn(
+                          "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
+                          localDynamicBonuses.freshnessEnabled ? "bg-neon-blue" : "bg-muted"
+                        )}
+                      >
+                        <div className={cn(
+                          "size-5 rounded-full bg-white transition-transform shadow-sm",
+                          localDynamicBonuses.freshnessEnabled ? "translate-x-4" : "translate-x-0"
+                        )} />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs flex-wrap">
+                      <span className="text-[11px] text-muted-foreground">최근</span>
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.freshnessGames}
+                        disabled={!localDynamicBonuses.freshnessEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, freshnessGames: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-14 h-8 text-center font-mono font-bold bg-background/50 border-border/30"
+                      />
+                      <span className="text-[11px] text-muted-foreground">경기 내 미매칭 상대 승리 시</span>
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.freshnessRp}
+                        disabled={!localDynamicBonuses.freshnessEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, freshnessRp: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-14 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue border-neon-blue/30"
+                      />
+                      <span className="font-bold text-neon-blue text-[11px]">점 추가</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      최근 경기 목록에서 매칭된 적 없는 새로운 상대와 경기 시 지급되는 점수입니다.
+                    </p>
+                  </div>
+
+                  {/* 7. 연승 */}
+                  <div className="flex flex-col justify-between p-3.5 rounded-lg border border-border/30 bg-background/25 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-foreground">🔥 연승</span>
+                      <button
+                        type="button"
+                        onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, streakEnabled: !prev.streakEnabled }))}
+                        className={cn(
+                          "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
+                          localDynamicBonuses.streakEnabled ? "bg-neon-blue" : "bg-muted"
+                        )}
+                      >
+                        <div className={cn(
+                          "size-5 rounded-full bg-white transition-transform shadow-sm",
+                          localDynamicBonuses.streakEnabled ? "translate-x-4" : "translate-x-0"
+                        )} />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs flex-wrap">
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.streakWins}
+                        disabled={!localDynamicBonuses.streakEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, streakWins: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-14 h-8 text-center font-mono font-bold bg-background/50 border-border/30"
+                      />
+                      <span className="text-[11px] text-muted-foreground">연승 이상 달성 시</span>
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.streakRp}
+                        disabled={!localDynamicBonuses.streakEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, streakRp: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-14 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue border-neon-blue/30"
+                      />
+                      <span className="font-bold text-neon-blue text-[11px]">점 추가</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      연승 흐름을 유지하며 승리를 거두었을 때 지급되는 점수입니다.
+                    </p>
+                  </div>
+
+                  {/* 8. 연패 탈출 (기존 연패 컴백) */}
+                  <div className="flex flex-col justify-between p-3.5 rounded-lg border border-border/30 bg-background/25 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-foreground">🔥 연패 탈출 (기존 연패 컴백)</span>
+                      <button
+                        type="button"
+                        onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, comebackEnabled: !prev.comebackEnabled }))}
+                        className={cn(
+                          "w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
+                          localDynamicBonuses.comebackEnabled ? "bg-neon-blue" : "bg-muted"
+                        )}
+                      >
+                        <div className={cn(
+                          "size-5 rounded-full bg-white transition-transform shadow-sm",
+                          localDynamicBonuses.comebackEnabled ? "translate-x-4" : "translate-x-0"
+                        )} />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs flex-wrap">
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.comebackLosses}
+                        disabled={!localDynamicBonuses.comebackEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, comebackLosses: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-14 h-8 text-center font-mono font-bold bg-background/50 border-border/30"
+                      />
+                      <span className="text-[11px] text-muted-foreground">연패 이상 탈출 시</span>
+                      <Input
+                        type="number"
+                        value={localDynamicBonuses.comebackRp}
+                        disabled={!localDynamicBonuses.comebackEnabled}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setLocalDynamicBonuses(prev => ({ ...prev, comebackRp: isNaN(val) ? 0 : val }));
+                        }}
+                        className="w-14 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue border-neon-blue/30"
+                      />
+                      <span className="font-bold text-neon-blue text-[11px]">점 추가</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      연패 탈출 끝에 승리를 장려하기 위해 지급되는 점수입니다.
+                    </p>
                   </div>
 
                 </div>
@@ -1094,232 +1322,7 @@ export function AdminPanel({
         </div>
       </Card>
 
-      {/* 1.2. Dynamic Bonuses settings (다이내믹 보너스 설정) */}
-      <Card className="border border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl relative overflow-hidden">
-        <div 
-          onClick={() => setIsDynamicBonusesOpen(!isDynamicBonusesOpen)}
-          className="flex items-center justify-between cursor-pointer select-none group"
-        >
-          <div className="flex-1 pr-4">
-            <div className="flex items-center gap-2 text-neon-blue">
-              <Settings className="size-5" />
-              <h3 className="font-black text-lg">다이내믹 보너스 설정 (Dynamic Bonus Settings)</h3>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              리그의 동적인 조건 만족 시 추가로 지급될 상세 보너스 규칙 및 RP 수치를 설정합니다.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-muted/40 border border-border/20 text-xs font-black text-muted-foreground group-hover:text-foreground group-hover:bg-muted/80 group-hover:border-neon-blue/30 transition-all shrink-0">
-            <span>보너스 설정 {isDynamicBonusesOpen ? "닫기" : "열기"}</span>
-            <span className="text-xs transition-transform duration-300">
-              {isDynamicBonusesOpen ? "▲" : "▼"}
-            </span>
-          </div>
-        </div>
 
-        <div className={cn(
-          "grid transition-all duration-300 ease-in-out",
-          isDynamicBonusesOpen ? "grid-rows-[1fr] opacity-100 mt-5" : "grid-rows-[0fr] opacity-0"
-        )}>
-          <div className="overflow-hidden min-h-0">
-            <div className="space-y-4 pt-2">
-              
-              {/* A. Freshness Bonus (신선도 보너스) */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl border border-border/20 bg-background/20">
-                <div className="flex items-start gap-3 flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, freshnessEnabled: !prev.freshnessEnabled }))}
-                    className={cn(
-                      "mt-1 w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
-                      localDynamicBonuses.freshnessEnabled ? "bg-neon-blue" : "bg-muted"
-                    )}
-                  >
-                    <div className={cn(
-                      "size-5 rounded-full bg-white transition-transform shadow-sm",
-                      localDynamicBonuses.freshnessEnabled ? "translate-x-4" : "translate-x-0"
-                    )} />
-                  </button>
-                  <div className="space-y-1">
-                    <span className="text-xs font-bold text-foreground block">A. 신선도 보너스</span>
-                    <span className="text-[10px] text-muted-foreground block">최근 매칭되지 않은 신선한 상대와의 승리를 장려하기 위한 보너스</span>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2 text-xs shrink-0 pl-12 md:pl-0">
-                  <Input
-                    type="number"
-                    value={localDynamicBonuses.freshnessGames}
-                    disabled={!localDynamicBonuses.freshnessEnabled}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setLocalDynamicBonuses(prev => ({ ...prev, freshnessGames: isNaN(val) ? 0 : val }));
-                    }}
-                    className="w-16 h-8 text-center font-mono font-bold bg-background/50 border-border/30"
-                  />
-                  <span className="text-muted-foreground">경기 내 미매칭 상대 승리 시</span>
-                  <Input
-                    type="number"
-                    value={localDynamicBonuses.freshnessRp}
-                    disabled={!localDynamicBonuses.freshnessEnabled}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setLocalDynamicBonuses(prev => ({ ...prev, freshnessRp: isNaN(val) ? 0 : val }));
-                    }}
-                    className="w-16 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue border-neon-blue/30"
-                  />
-                  <span className="font-bold text-neon-blue">점 추가</span>
-                </div>
-              </div>
-
-              {/* B. Winning Streak Bonus (연승 보너스) */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl border border-border/20 bg-background/20">
-                <div className="flex items-start gap-3 flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, streakEnabled: !prev.streakEnabled }))}
-                    className={cn(
-                      "mt-1 w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
-                      localDynamicBonuses.streakEnabled ? "bg-neon-blue" : "bg-muted"
-                    )}
-                  >
-                    <div className={cn(
-                      "size-5 rounded-full bg-white transition-transform shadow-sm",
-                      localDynamicBonuses.streakEnabled ? "translate-x-4" : "translate-x-0"
-                    )} />
-                  </button>
-                  <div className="space-y-1">
-                    <span className="text-xs font-bold text-foreground block">B. 연승 보너스</span>
-                    <span className="text-[10px] text-muted-foreground block">연속으로 승리를 이어갈 때 추가 지급되는 보너스</span>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2 text-xs shrink-0 pl-12 md:pl-0">
-                  <Input
-                    type="number"
-                    value={localDynamicBonuses.streakWins}
-                    disabled={!localDynamicBonuses.streakEnabled}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setLocalDynamicBonuses(prev => ({ ...prev, streakWins: isNaN(val) ? 0 : val }));
-                    }}
-                    className="w-16 h-8 text-center font-mono font-bold bg-background/50 border-border/30"
-                  />
-                  <span className="text-muted-foreground">연승 이상 달성 시</span>
-                  <Input
-                    type="number"
-                    value={localDynamicBonuses.streakRp}
-                    disabled={!localDynamicBonuses.streakEnabled}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setLocalDynamicBonuses(prev => ({ ...prev, streakRp: isNaN(val) ? 0 : val }));
-                    }}
-                    className="w-16 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue border-neon-blue/30"
-                  />
-                  <span className="font-bold text-neon-blue">점 추가</span>
-                </div>
-              </div>
-
-              {/* C. Comeback Bonus (연패 컴백 보너스) */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl border border-border/20 bg-background/20">
-                <div className="flex items-start gap-3 flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, comebackEnabled: !prev.comebackEnabled }))}
-                    className={cn(
-                      "mt-1 w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
-                      localDynamicBonuses.comebackEnabled ? "bg-neon-blue" : "bg-muted"
-                    )}
-                  >
-                    <div className={cn(
-                      "size-5 rounded-full bg-white transition-transform shadow-sm",
-                      localDynamicBonuses.comebackEnabled ? "translate-x-4" : "translate-x-0"
-                    )} />
-                  </button>
-                  <div className="space-y-1">
-                    <span className="text-xs font-bold text-foreground block">C. 연패 컴백 보너스</span>
-                    <span className="text-[10px] text-muted-foreground block">긴 연패 끝에 귀중한 1승을 거두며 부활할 때 지급되는 보너스</span>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2 text-xs shrink-0 pl-12 md:pl-0">
-                  <Input
-                    type="number"
-                    value={localDynamicBonuses.comebackLosses}
-                    disabled={!localDynamicBonuses.comebackEnabled}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setLocalDynamicBonuses(prev => ({ ...prev, comebackLosses: isNaN(val) ? 0 : val }));
-                    }}
-                    className="w-16 h-8 text-center font-mono font-bold bg-background/50 border-border/30"
-                  />
-                  <span className="text-muted-foreground">연패 이상 탈출 시</span>
-                  <Input
-                    type="number"
-                    value={localDynamicBonuses.comebackRp}
-                    disabled={!localDynamicBonuses.comebackEnabled}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setLocalDynamicBonuses(prev => ({ ...prev, comebackRp: isNaN(val) ? 0 : val }));
-                    }}
-                    className="w-16 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue border-neon-blue/30"
-                  />
-                  <span className="font-bold text-neon-blue">점 추가</span>
-                </div>
-              </div>
-
-              {/* D. Large Margin Win Bonus (압승 보너스 - 복식용) */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl border border-border/20 bg-background/20">
-                <div className="flex items-start gap-3 flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setLocalDynamicBonuses(prev => ({ ...prev, marginEnabled: !prev.marginEnabled }))}
-                    className={cn(
-                      "mt-1 w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0",
-                      localDynamicBonuses.marginEnabled ? "bg-neon-blue" : "bg-muted"
-                    )}
-                  >
-                    <div className={cn(
-                      "size-5 rounded-full bg-white transition-transform shadow-sm",
-                      localDynamicBonuses.marginEnabled ? "translate-x-4" : "translate-x-0"
-                    )} />
-                  </button>
-                  <div className="space-y-1">
-                    <span className="text-xs font-bold text-foreground block">D. 압승 보너스 (복식용)</span>
-                    <span className="text-[10px] text-muted-foreground block">큰 점수 차이로 시원하게 이겼을 때(대승) 지급되는 보너스</span>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2 text-xs shrink-0 pl-12 md:pl-0">
-                  <Input
-                    type="number"
-                    value={localDynamicBonuses.marginDiff}
-                    disabled={!localDynamicBonuses.marginEnabled}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setLocalDynamicBonuses(prev => ({ ...prev, marginDiff: isNaN(val) ? 0 : val }));
-                    }}
-                    className="w-16 h-8 text-center font-mono font-bold bg-background/50 border-border/30"
-                  />
-                  <span className="text-muted-foreground">점 차 이상 승리 시</span>
-                  <Input
-                    type="number"
-                    value={localDynamicBonuses.marginRp}
-                    disabled={!localDynamicBonuses.marginEnabled}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setLocalDynamicBonuses(prev => ({ ...prev, marginRp: isNaN(val) ? 0 : val }));
-                    }}
-                    className="w-16 h-8 text-center font-mono font-bold bg-background/50 border-border/30 text-neon-blue border-neon-blue/30"
-                  />
-                  <span className="font-bold text-neon-blue">점 추가</span>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        </div>
-      </Card>
 
       {/* 3.9. All Match Records Integrated Management Section (전체 경기 기록 통합 관리) */}
       <Card className="border border-border/60 bg-card/60 p-6 backdrop-blur shadow-xl relative overflow-hidden">
@@ -1590,38 +1593,34 @@ export function AdminPanel({
                       minute: "2-digit"
                     });
 
-                    // Gather individual bonuses to display as premium badges
-                    const bonusesA = [];
-                    if (m.rivalBonusA && m.rivalBonusA > 0) bonusesA.push("⚔️ 라이벌 (+5)");
-                    if (m.firstWinBonusA && m.firstWinBonusA > 0) bonusesA.push("🌟 첫승 (+15)");
-                    if (m.revengeBonusA && m.revengeBonusA > 0) bonusesA.push("😈 복수 (+10)");
-                    if (m.underdogBonusA && m.underdogBonusA > 0) bonusesA.push(`🛡️ 언더독 (+${m.underdogBonusA})`);
-                    if (m.scoreDiffBonusA && m.scoreDiffBonusA > 0) bonusesA.push(`🔥 압승 (+${m.scoreDiffBonusA})`);
+                    // Gather individual settings items to display as premium badges
+                    const getMatchBonuses = (roleSuffix: "" | "2", isTeamA: boolean) => {
+                      const bonuses = [];
+                      const rival = isTeamA ? (roleSuffix === "" ? m.rivalBonusA : m.rivalBonusA2) : (roleSuffix === "" ? m.rivalBonusB : m.rivalBonusB2);
+                      const firstWin = isTeamA ? (roleSuffix === "" ? m.firstWinBonusA : m.firstWinBonusA2) : (roleSuffix === "" ? m.firstWinBonusB : m.firstWinBonusB2);
+                      const revenge = isTeamA ? (roleSuffix === "" ? m.revengeBonusA : m.revengeBonusA2) : (roleSuffix === "" ? m.revengeBonusB : m.revengeBonusB2);
+                      const underdog = isTeamA ? (roleSuffix === "" ? m.underdogBonusA : m.underdogBonusA2) : (roleSuffix === "" ? m.underdogBonusB : m.underdogBonusB2);
+                      const scoreDiff = isTeamA ? (roleSuffix === "" ? m.scoreDiffBonusA : m.scoreDiffBonusA2) : (roleSuffix === "" ? m.scoreDiffBonusB : m.scoreDiffBonusB2);
+                      const margin = isTeamA ? (roleSuffix === "" ? m.marginBonusA : m.marginBonusA2) : (roleSuffix === "" ? m.marginBonusB : m.marginBonusB2);
+                      const freshness = isTeamA ? (roleSuffix === "" ? m.freshnessBonusA : m.freshnessBonusA2) : (roleSuffix === "" ? m.freshnessBonusB : m.freshnessBonusB2);
+                      const streak = isTeamA ? (roleSuffix === "" ? m.streakBonusA : m.streakBonusA2) : (roleSuffix === "" ? m.streakBonusB : m.streakBonusB2);
+                      const comeback = isTeamA ? (roleSuffix === "" ? m.comebackBonusA : m.comebackBonusA2) : (roleSuffix === "" ? m.comebackBonusB : m.comebackBonusB2);
 
-                    const bonusesA2 = [];
-                    if (playerA2) {
-                      if (m.rivalBonusA2 && m.rivalBonusA2 > 0) bonusesA2.push("⚔️ 라이벌 (+5)");
-                      if (m.firstWinBonusA2 && m.firstWinBonusA2 > 0) bonusesA2.push("🌟 첫승 (+15)");
-                      if (m.revengeBonusA2 && m.revengeBonusA2 > 0) bonusesA2.push("😈 복수 (+10)");
-                      if (m.underdogBonusA2 && m.underdogBonusA2 > 0) bonusesA2.push(`🛡️ 언더독 (+${m.underdogBonusA2})`);
-                      if (m.scoreDiffBonusA2 && m.scoreDiffBonusA2 > 0) bonusesA2.push(`🔥 압승 (+${m.scoreDiffBonusA2})`);
-                    }
-
-                    const bonusesB = [];
-                    if (m.rivalBonusB && m.rivalBonusB > 0) bonusesB.push("⚔️ 라이벌 (+5)");
-                    if (m.firstWinBonusB && m.firstWinBonusB > 0) bonusesB.push("🌟 첫승 (+15)");
-                    if (m.revengeBonusB && m.revengeBonusB > 0) bonusesB.push("😈 복수 (+10)");
-                    if (m.underdogBonusB && m.underdogBonusB > 0) bonusesB.push(`🛡️ 언더독 (+${m.underdogBonusB})`);
-                    if (m.scoreDiffBonusB && m.scoreDiffBonusB > 0) bonusesB.push(`🔥 압승 (+${m.scoreDiffBonusB})`);
-
-                    const bonusesB2 = [];
-                    if (playerB2) {
-                      if (m.rivalBonusB2 && m.rivalBonusB2 > 0) bonusesB2.push("⚔️ 라이벌 (+5)");
-                      if (m.firstWinBonusB2 && m.firstWinBonusB2 > 0) bonusesB2.push("🌟 첫승 (+15)");
-                      if (m.revengeBonusB2 && m.revengeBonusB2 > 0) bonusesB2.push("😈 복수 (+10)");
-                      if (m.underdogBonusB2 && m.underdogBonusB2 > 0) bonusesB2.push(`🛡️ 언더독 (+${m.underdogBonusB2})`);
-                      if (m.scoreDiffBonusB2 && m.scoreDiffBonusB2 > 0) bonusesB2.push(`🔥 압승 (+${m.scoreDiffBonusB2})`);
-                    }
+                      if (firstWin && firstWin > 0) bonuses.push(`🌟 오늘의 첫 승 (+${firstWin})`);
+                      if (revenge && revenge > 0) bonuses.push(`😈 복수전 성공 (+${revenge})`);
+                      if (underdog && underdog > 0) bonuses.push(`🛡️ 언더독 격파 (+${underdog})`);
+                      const finalMargin = (margin ?? 0) + (scoreDiff ?? 0);
+                      if (finalMargin > 0) bonuses.push(`🚀 압승 (+${finalMargin})`);
+                      if (rival && rival > 0) bonuses.push(`⚔️ 라이벌 격파 (+${rival})`);
+                      if (freshness && freshness > 0) bonuses.push(`✨ 신선한 매치 (+${freshness})`);
+                      if (streak && streak > 0) bonuses.push(`🔥 연승 (+${streak})`);
+                      if (comeback && comeback > 0) bonuses.push(`🩹 연패 탈출 (+${comeback})`);
+                      return bonuses;
+                    };
+                    const bonusesA = getMatchBonuses("", true);
+                    const bonusesA2 = playerA2 ? getMatchBonuses("2", true) : [];
+                    const bonusesB = getMatchBonuses("", false);
+                    const bonusesB2 = playerB2 ? getMatchBonuses("2", false) : [];
 
                     return (
                       <tr key={m.id} className="border-b border-border/20 hover:bg-accent/10 transition-colors">
