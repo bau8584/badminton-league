@@ -406,7 +406,6 @@ function useLeagueStoreInternal() {
     }
     // 세션에 개인 scriptUrl이 없으면 동기화 생략 (로컬 저장만 적용 - 게스트 모드 포함)
     if (!session || !session.scriptUrl) return;
-    setIsSyncing(true);
 
     try {
       const res = await fetch(session.scriptUrl!, {
@@ -454,8 +453,6 @@ function useLeagueStoreInternal() {
         setMatches(previousMatches);
         saveJSON(MATCHES_KEY, previousMatches);
       }
-    } finally {
-      setIsSyncing(false);
     }
   }, [session]);
 
