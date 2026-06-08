@@ -335,6 +335,64 @@ function useLeagueStoreInternal() {
     }
   }, []);
 
+  // 1-1. 전체 학생 동기화 (SYNC_ALL)
+  const syncAllStudentsToGoogleSheets = useCallback(async (
+    targetStudents: Student[],
+    previousStudents?: Student[]
+  ) => {
+    if (currentViewSeasonRef.current !== "현재 시즌") {
+      toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
+      return false;
+    }
+    if (!session || !session.scriptUrl) return true;
+    setIsSyncing(true);
+
+    try {
+      const res = await fetch(session.scriptUrl!, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "SYNC_ALL",
+          students: targetStudents
+        })
+      });
+
+      if (res.status === 429 || res.status === 500 || res.status === 503) {
+        throw new Error(`STATUS_${res.status}`);
+      }
+
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {}
+
+      if (data && data.status === "error") {
+        throw new Error(data.message || "SYNC_ERROR");
+      }
+
+      toast.success("데이터베이스에 저장되었습니다.");
+      return true;
+    } catch (error) {
+      console.error("Syncing all students to Google Sheets failed:", error);
+      toast.error("서버 혼잡 또는 네트워크 오류로 학생 데이터 동기화에 실패했습니다.", {
+        id: "sync-all-error",
+        duration: 5000
+      });
+
+      // 동기화 실패 시 이전 상태로 복구
+      if (previousStudents) {
+        setStudents(previousStudents);
+        saveJSON(STUDENTS_KEY, previousStudents);
+      }
+      return false;
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [session]);
+
   // 1. 단일 경기 기록 서버 원장 동기화 (RECORD_LEDGER)
   const recordMatchToGoogleSheets = useCallback(async (
     match: Match,
@@ -1216,7 +1274,21 @@ function useLeagueStoreInternal() {
 
     const playerA = students.find((s) => s.id === playerAId);
     const playerB = students.find((s) => s.id === playerBId);
-    if (!playerA || !playerB) return;
+    const playerA2 = playerA2Id ? students.find((s) => s.id === playerA2Id) : null;
+    const playerB2 = playerB2Id ? students.find((s) => s.id === playerB2Id) : null;
+
+    const isPlayerAInvalid = !playerA || isNaN(playerA.rp) || typeof playerA.rp !== "number";
+    const isPlayerBInvalid = !playerB || isNaN(playerB.rp) || typeof playerB.rp !== "number";
+    const isPlayerA2Invalid = playerA2Id ? (!playerA2 || isNaN(playerA2.rp) || typeof playerA2.rp !== "number") : false;
+    const isPlayerB2Invalid = playerB2Id ? (!playerB2 || isNaN(playerB2.rp) || typeof playerB2.rp !== "number") : false;
+
+    if (isPlayerAInvalid || isPlayerBInvalid || isPlayerA2Invalid || isPlayerB2Invalid) {
+      toast.error("학생 데이터가 완전히 동기화되지 않았습니다. 새로고침 후 다시 시도해주세요.", {
+        id: "student-not-synced-error",
+        duration: 5000
+      });
+      return;
+    }
 
     // 오늘의 날짜 구하기 (로컬 타임존 반영)
     const today = new Date();
@@ -1579,7 +1651,7 @@ function useLeagueStoreInternal() {
   }, [students, matches, recordMatchToGoogleSheets, rpVariables, tierThresholds]);
 
   // 경기 삭제(롤백) 및 동기화
-  const deleteMatch = useCallback((matchId: string) => {
+  const deleteMatch = useCallback(async (matchId: string) => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
       return;
@@ -1638,12 +1710,18 @@ function useLeagueStoreInternal() {
       };
     });
 
+    const previousStudents = [...students];
+    const previousMatches = [...matches];
     setMatches(nextMatches);
     setStudents(nextStudents);
-  }, [students, matches, rpVariables]);
+    saveJSON(STUDENTS_KEY, nextStudents);
+    saveJSON(MATCHES_KEY, nextMatches);
+
+    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+  }, [students, matches, rpVariables, syncAllStudentsToGoogleSheets]);
 
   // 개별 학생 전적 리셋 및 동기화
-  const resetStudent = useCallback((studentId: string) => {
+  const resetStudent = useCallback(async (studentId: string) => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
       return;
@@ -1701,12 +1779,18 @@ function useLeagueStoreInternal() {
       return s;
     });
 
+    const previousStudents = [...students];
+    const previousMatches = [...matches];
     setMatches(nextMatches);
     setStudents(nextStudents);
-  }, [students, matches]);
+    saveJSON(STUDENTS_KEY, nextStudents);
+    saveJSON(MATCHES_KEY, nextMatches);
+
+    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+  }, [students, matches, syncAllStudentsToGoogleSheets]);
 
   // 시즌 전체 초기화 및 동기화
-  const resetAllData = useCallback(() => {
+  const resetAllData = useCallback(async () => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
       return;
@@ -1720,12 +1804,18 @@ function useLeagueStoreInternal() {
       recent: [],
     }));
 
+    const previousStudents = [...students];
+    const previousMatches = [...matches];
     setMatches(nextMatches);
     setStudents(nextStudents);
-  }, [students, matches]);
+    saveJSON(STUDENTS_KEY, nextStudents);
+    saveJSON(MATCHES_KEY, nextMatches);
+
+    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+  }, [students, matches, syncAllStudentsToGoogleSheets]);
 
   // 교사 관리자 수동 RP 수정 및 동기화
-  const updateStudentRP = useCallback((studentId: string, nextRp: number) => {
+  const updateStudentRP = useCallback(async (studentId: string, nextRp: number) => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
       return;
@@ -1738,12 +1828,16 @@ function useLeagueStoreInternal() {
       };
     });
 
+    const previousStudents = [...students];
     setStudents(nextStudents);
-  }, [students, matches]);
+    saveJSON(STUDENTS_KEY, nextStudents);
+
+    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+  }, [students, syncAllStudentsToGoogleSheets]);
 
   // 새로운 명렬표 대량 업서트 및 동기화
   const upsertStudents = useCallback(
-    (rows: { grade: number; classNum: number; number: number; name: string; gender?: Gender }[]) => {
+    async (rows: { grade: number; classNum: number; number: number; name: string; gender?: Gender }[]) => {
       if (currentViewSeasonRef.current !== "현재 시즌") {
         toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
         return { added: 0, kept: 0 };
@@ -1782,11 +1876,15 @@ function useLeagueStoreInternal() {
         if (!seenKeys.has(k)) next.push(s);
       }
       
+      const previousStudents = [...students];
       setStudents(next);
+      saveJSON(STUDENTS_KEY, next);
+
+      await syncAllStudentsToGoogleSheets(next, previousStudents);
 
       return { added, kept };
     },
-    [students, matches],
+    [students, syncAllStudentsToGoogleSheets],
   );
 
   // 리그전 커스텀 설정 캘리브레이션 업데이트 함수
@@ -1796,7 +1894,7 @@ function useLeagueStoreInternal() {
   }, []);
 
   // 특정 학생의 성별 변경 및 구글 시트 동기화
-  const updateStudentGender = useCallback((studentId: string, gender: Gender) => {
+  const updateStudentGender = useCallback(async (studentId: string, gender: Gender) => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
       return;
@@ -1805,11 +1903,15 @@ function useLeagueStoreInternal() {
       if (s.id !== studentId) return s;
       return { ...s, gender };
     });
+    const previousStudents = [...students];
     setStudents(nextStudents);
-  }, [students, matches]);
+    saveJSON(STUDENTS_KEY, nextStudents);
+
+    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+  }, [students, syncAllStudentsToGoogleSheets]);
 
   // 개별 학생 삭제 및 연쇄 삭제 & 전적 복구 롤백
-  const deleteStudent = useCallback((studentId: string) => {
+  const deleteStudent = useCallback(async (studentId: string) => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
       return;
@@ -1888,24 +1990,34 @@ function useLeagueStoreInternal() {
       };
     });
 
+    const previousStudents = [...students];
+    const previousMatches = [...matches];
     setMatches(nextMatches);
     setStudents(nextStudents);
-  }, [students, matches, rpVariables]);
+    saveJSON(STUDENTS_KEY, nextStudents);
+    saveJSON(MATCHES_KEY, nextMatches);
+
+    await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
+  }, [students, matches, rpVariables, syncAllStudentsToGoogleSheets]);
 
   // CSV 롤백 복원 액션
-  const restoreFromCSV = useCallback((restoredStudents: Student[], restoredMatches: Match[]) => {
+  const restoreFromCSV = useCallback(async (restoredStudents: Student[], restoredMatches: Match[]) => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
       return;
     }
+    const previousStudents = [...students];
+    const previousMatches = [...matches];
     setStudents(restoredStudents);
     setMatches(restoredMatches);
     saveJSON(STUDENTS_KEY, restoredStudents);
     saveJSON(MATCHES_KEY, restoredMatches);
-  }, [students, matches]);
+
+    await syncAllStudentsToGoogleSheets(restoredStudents, previousStudents);
+  }, [students, matches, syncAllStudentsToGoogleSheets]);
 
   // 교사 통제형 휴면 강등 일괄 RP 차감 액션
-  const bulkDecayRP = useCallback((inactiveDays: number, decayAmount: number) => {
+  const bulkDecayRP = useCallback(async (inactiveDays: number, decayAmount: number) => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
       return 0;
@@ -1934,14 +2046,17 @@ function useLeagueStoreInternal() {
     });
 
     if (affectedCount > 0) {
+      const previousStudents = [...students];
       setStudents(nextStudents);
+      saveJSON(STUDENTS_KEY, nextStudents);
+      await syncAllStudentsToGoogleSheets(nextStudents, previousStudents);
     }
 
     return affectedCount;
-  }, [students, matches, tierThresholds]);
+  }, [students, matches, tierThresholds, syncAllStudentsToGoogleSheets]);
 
   // 경기 점수 수정 및 보너스/RP 완벽 재계산 액션
-  const updateMatchScore = useCallback((matchId: string, nextScoreA: number, nextScoreB: number) => {
+  const updateMatchScore = useCallback(async (matchId: string, nextScoreA: number, nextScoreB: number) => {
     if (currentViewSeasonRef.current !== "현재 시즌") {
       toast.error("과거 시즌 기록은 수정할 수 없습니다 (읽기 전용).");
       return;
@@ -2273,9 +2388,14 @@ function useLeagueStoreInternal() {
 
     const nextMatchesList = matches.map((m) => m.id === matchId ? updatedMatch : m);
 
+    const previousStudents = [...students];
     setStudents(nextStudentsList);
     setMatches(nextMatchesList);
-  }, [matches, students, tierThresholds, rpVariables]);
+    saveJSON(STUDENTS_KEY, nextStudentsList);
+    saveJSON(MATCHES_KEY, nextMatchesList);
+
+    await syncAllStudentsToGoogleSheets(nextStudentsList, previousStudents);
+  }, [matches, students, tierThresholds, rpVariables, syncAllStudentsToGoogleSheets]);
 
   // 리그 커스텀 설정 통합 저장 (마스터 DB 동기화 포함)
   const saveLeagueSettings = useCallback(async (

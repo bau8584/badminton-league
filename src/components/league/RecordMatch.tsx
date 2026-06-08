@@ -438,6 +438,16 @@ export function RecordMatch({
 
     if (scoreA === scoreB) return toast.error("무승부는 등록할 수 없습니다");
 
+    // Validate if selected students actually exist in the students list and have valid RP values
+    const isPlayerAInvalid = !playerA || isNaN(playerA.rp) || typeof playerA.rp !== "number";
+    const isPlayerBInvalid = !playerB || isNaN(playerB.rp) || typeof playerB.rp !== "number";
+    const isPlayerA2Invalid = matchType === "double" ? (!playerA2 || isNaN(playerA2.rp) || typeof playerA2.rp !== "number") : false;
+    const isPlayerB2Invalid = matchType === "double" ? (!playerB2 || isNaN(playerB2.rp) || typeof playerB2.rp !== "number") : false;
+
+    if (isPlayerAInvalid || isPlayerBInvalid || isPlayerA2Invalid || isPlayerB2Invalid) {
+      return toast.error("학생 데이터가 완전히 동기화되지 않았습니다. 새로고침 후 다시 시도해주세요.");
+    }
+
     const aWon = scoreA > scoreB;
     const winnerScore = aWon ? scoreA : scoreB;
     const loserScore = aWon ? scoreB : scoreA;

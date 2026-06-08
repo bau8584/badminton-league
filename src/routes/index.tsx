@@ -122,6 +122,21 @@ function Index() {
     }
   }, [session, students]);
 
+  // Prevent closing the page during synchronization
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isSyncing) {
+        e.preventDefault();
+        e.returnValue = "학생 데이터 동기화 중입니다. 페이지를 종료하시겠습니까?";
+        return e.returnValue;
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [isSyncing]);
+
   const handleSelectRecommendedMatch = (playerAId: string, playerBId: string) => {
     setRecommendInitials({ playerAId, playerBId });
     setTab("record");
@@ -441,6 +456,21 @@ function Index() {
         )}
       </main>
 
+      {isSyncing && (
+        <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background/80 backdrop-blur-md">
+          <div className="flex flex-col items-center gap-4 p-6 rounded-2xl border border-border/50 bg-card/60 shadow-[0_0_50px_rgba(0,180,216,0.15)] animate-in fade-in zoom-in-95 duration-200">
+            <div className="relative flex size-16 items-center justify-center">
+              <div className="absolute inset-0 rounded-full border-4 border-muted/30" />
+              <div className="absolute inset-0 rounded-full border-4 border-neon-blue border-t-transparent animate-spin" />
+              <Swords className="size-6 text-neon-blue animate-pulse" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-bold text-foreground">학생 데이터 동기화 중...</h3>
+              <p className="text-xs text-muted-foreground mt-1">서버에 데이터를 안전하게 저장하고 있습니다.<br/>창을 닫거나 새로고침하지 마세요.</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

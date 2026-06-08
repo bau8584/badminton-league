@@ -106,7 +106,7 @@ export function AdminPanel({
 }: {
   students: Student[];
   matches: Match[];
-  onUpsert: (rows: Row[]) => { added: number; kept: number };
+  onUpsert: (rows: Row[]) => Promise<{ added: number; kept: number }>;
   count: number;
   isLocked: boolean;
   onToggleLock: (locked: boolean) => void;
@@ -623,9 +623,9 @@ export function AdminPanel({
   }, [matches, selectedStudentId]);
 
   // Bulk NEIS commit
-  const commit = () => {
+  const commit = async () => {
     if (parsed.rows.length === 0) return toast.error("등록할 학생이 없습니다");
-    const { added, kept } = onUpsert(parsed.rows);
+    const { added, kept } = await onUpsert(parsed.rows);
     setText("");
     toast.success(`신규 ${added}명 등록, 기존 ${kept}명 전적 유지`);
   };
